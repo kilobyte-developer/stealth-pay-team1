@@ -13,6 +13,19 @@ import {
   type StealthIdentityPublic,
   type SupportedChainId,
 } from "@/lib/stealth";
+import {
+  DEFAULT_AUTO_LOCK_MS,
+  changeVaultPassword,
+  confirmBackupStored,
+  createVault,
+  exportBackup,
+  getVaultStatus,
+  hasVault,
+  importBackup,
+  toSafeVaultMessage,
+  unlockVault,
+  type VaultStatus,
+} from "@/lib/vault";
 import { NETWORKS } from "@/config/networks";
 import { useActiveNetwork } from "@/providers/wallet-provider";
 import type { Address, Hex } from "viem";
@@ -26,31 +39,50 @@ export interface AnnouncementInput {
 
 export interface SpendKeyProof {
   ok: boolean;
-  /** Address the recovered key controls. Present only on success. */
   stealthAddress?: Address;
   error?: string;
+}
+
+export interface BackupFile {
+  filename: string;
+  contents: string;
 }
 
 interface StealthIdentityContextValue {
   /** Public half only. Secrets are never placed in React state. */
   publicIdentity: StealthIdentityPublic | null;
   hasIdentity: boolean;
+  /** True when an encrypted vault exists on this device. */
+  vaultExists: boolean;
+  /** True while the vault exists but is not unlocked in memory. */
+  isLocked: boolean;
+  vaultStatus: VaultStatus | null;
+  busy: boolean;
   /** True when the identity's chain differs from the wallet's active chain. */
   chainMismatch: boolean;
   activeChainName: string;
   error: string | null;
 
-  createIdentity: (chainId?: SupportedChainId) => void;
-  /** Best-effort destruction of in-memory secrets. */
-  lockIdentity: () => void;
+  /** Generates a new identity AND encrypts it into the local vault. */
+  createIdentity: (
+    password: string,
+    chainId?: SupportedChainId,
+    options?: { allowOverwrite?: boolean },
+  ) => Promise<boolean>;
+  unlock: (password: string) => Promise<boolean>;
+  lock: () => void;
+  requestExport: (password: string) => Promise<BackupFile | null>;
+  requestImport: (
+    fileContents: string,
+    password: string,
+    options?: { allowOverwrite?: boolean },
+  ) => Promise<boolean>;
+  changePassword: (current: string, next: string) => Promise<boolean>;
+  confirmBackup: () => Promise<void>;
+  refreshVaultStatus: () => Promise<void>;
   clearError: () => void;
 
-  /** Runs a real ERC-5564 check using the in-memory viewing key. */
   checkAnnouncement: (input: AnnouncementInput) => StealthCheckResult | null;
-  /**
-   * Derives the one-time spending key, verifies it controls the announced
-   * address, then destroys it. Returns proof of control — never the key.
-   */
   proveSpendControl: (input: AnnouncementInput) => SpendKeyProof;
 }
 
@@ -68,20 +100,23 @@ export function useStealthIdentity() {
 }
 
 /**
- * Holds a stealth identity for the current browser session.
+ * Owns the stealth identity for this browser session.
  *
  * ## Security boundary
- * The full {@link StealthIdentityBundle} — including both private scalars —
- * lives only in a ref inside this provider's closure. It is never put into
- * React state, never passed as a prop, and never returned from the context.
- * Components that need a cryptographic operation call a method here instead.
+ * The full {@link StealthIdentityBundle} — both private scalars — lives only
+ * in a ref inside this closure. It is never placed in React state, never
+ * passed as a prop, and never returned from the context. There is deliberately
+ * no getter that returns raw private keys. Components call narrow operations
+ * and receive results.
+ *
+ * Vault passwords are passed in as short-lived arguments, used once, and never
+ * stored, logged or sent anywhere.
  *
  * ## Persistence
- * There is deliberately none. Nothing is written to `localStorage`,
- * `sessionStorage`, cookies, IndexedDB, an API route or Supabase. A page
- * refresh, tab close or `lockIdentity()` destroys the identity permanently —
- * there is no backup or recovery mechanism in this milestone, and any future
- * one must be designed separately.
+ * Only the Argon2id + AES-256-GCM ciphertext is persisted, in IndexedDB. A
+ * refresh no longer destroys the identity — it locks it. Recovery across
+ * devices requires the exported backup file plus its password; there is no
+ * server-side copy and no reset path.
  */
 export function StealthIdentityProvider({
   children,
@@ -91,42 +126,182 @@ export function StealthIdentityProvider({
   const bundleRef = React.useRef<StealthIdentityBundle | null>(null);
   const [publicIdentity, setPublicIdentity] =
     React.useState<StealthIdentityPublic | null>(null);
+  const [vaultStatus, setVaultStatus] = React.useState<VaultStatus | null>(null);
+  const [vaultExists, setVaultExists] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const activeNetworkKey = useActiveNetwork();
   const activeChainId = NETWORKS[activeNetworkKey].chainId as SupportedChainId;
 
-  const createIdentity = React.useCallback(
-    (chainId?: SupportedChainId) => {
-      setError(null);
-      try {
-        bundleRef.current?.secrets.destroy();
-        const bundle = generateStealthIdentity(
-          chainId ?? activeChainId ?? DEFAULT_CHAIN_ID,
-        );
-        bundleRef.current = bundle;
-        setPublicIdentity(bundle.publicIdentity);
-      } catch (err) {
-        setError(toSafeErrorMessage(err));
-      }
-    },
-    [activeChainId],
-  );
+  const unlocked = publicIdentity !== null;
 
-  const lockIdentity = React.useCallback(() => {
+  const refreshVaultStatus = React.useCallback(async () => {
+    try {
+      const [exists, status] = await Promise.all([
+        hasVault(),
+        getVaultStatus(bundleRef.current !== null),
+      ]);
+      setVaultExists(exists);
+      setVaultStatus(status);
+    } catch {
+      // Storage unavailable (private mode, blocked site data). The app still
+      // works; it simply cannot persist an identity.
+      setVaultExists(false);
+      setVaultStatus(null);
+    }
+  }, []);
+
+  // Detect an existing vault on first mount so the unlock screen can appear.
+  React.useEffect(() => {
+    void refreshVaultStatus();
+  }, [refreshVaultStatus]);
+
+  const lock = React.useCallback(() => {
     bundleRef.current?.secrets.destroy();
     bundleRef.current = null;
     setPublicIdentity(null);
     setError(null);
-  }, []);
+    void refreshVaultStatus();
+  }, [refreshVaultStatus]);
 
-  // Destroy secrets if the provider itself is torn down.
+  // Destroy secrets if the provider is torn down.
   React.useEffect(() => {
     return () => {
       bundleRef.current?.secrets.destroy();
       bundleRef.current = null;
     };
   }, []);
+
+  /* ---- Inactivity auto-lock ---- */
+  // Seeded inside the effect, not during render: reading the clock while
+  // rendering is impure and can yield unstable values across re-renders.
+  const lastActivity = React.useRef(0);
+  React.useEffect(() => {
+    if (!unlocked) return;
+    lastActivity.current = Date.now();
+
+    const bump = () => {
+      lastActivity.current = Date.now();
+    };
+    const windowEvents: (keyof WindowEventMap)[] = ["pointerdown", "keydown"];
+    for (const e of windowEvents) window.addEventListener(e, bump);
+    // `visibilitychange` is a document event, not a window event.
+    document.addEventListener("visibilitychange", bump);
+
+    const timer = window.setInterval(() => {
+      if (Date.now() - lastActivity.current >= DEFAULT_AUTO_LOCK_MS) lock();
+    }, 30_000);
+
+    return () => {
+      for (const e of windowEvents) window.removeEventListener(e, bump);
+      document.removeEventListener("visibilitychange", bump);
+      window.clearInterval(timer);
+    };
+  }, [unlocked, lock]);
+
+  /* ---- Operations ---- */
+
+  async function run<T>(
+    operation: () => Promise<T>,
+    fallback: T,
+  ): Promise<T> {
+    setBusy(true);
+    setError(null);
+    try {
+      return await operation();
+    } catch (err) {
+      setError(toSafeVaultMessage(err) || toSafeErrorMessage(err));
+      return fallback;
+    } finally {
+      setBusy(false);
+      void refreshVaultStatus();
+    }
+  }
+
+  const createIdentity = React.useCallback(
+    async (
+      password: string,
+      chainId?: SupportedChainId,
+      options?: { allowOverwrite?: boolean },
+    ) =>
+      run(async () => {
+        const bundle = generateStealthIdentity(
+          chainId ?? activeChainId ?? DEFAULT_CHAIN_ID,
+        );
+        try {
+          // Encrypts, verifies the round trip, then persists. Throws before
+          // writing anything if the round trip fails.
+          await createVault(bundle, password, options);
+        } catch (err) {
+          bundle.secrets.destroy();
+          throw err;
+        }
+        bundleRef.current?.secrets.destroy();
+        bundleRef.current = bundle;
+        setPublicIdentity(bundle.publicIdentity);
+        return true;
+      }, false),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeChainId, refreshVaultStatus],
+  );
+
+  const unlock = React.useCallback(
+    async (password: string) =>
+      run(async () => {
+        const bundle = await unlockVault(password);
+        bundleRef.current?.secrets.destroy();
+        bundleRef.current = bundle;
+        setPublicIdentity(bundle.publicIdentity);
+        lastActivity.current = Date.now();
+        return true;
+      }, false),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refreshVaultStatus],
+  );
+
+  const requestExport = React.useCallback(
+    async (password: string) =>
+      run<BackupFile | null>(async () => exportBackup(password), null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refreshVaultStatus],
+  );
+
+  const requestImport = React.useCallback(
+    async (
+      fileContents: string,
+      password: string,
+      options?: { allowOverwrite?: boolean },
+    ) =>
+      run(async () => {
+        const bundle = await importBackup(fileContents, password, options);
+        bundleRef.current?.secrets.destroy();
+        bundleRef.current = bundle;
+        setPublicIdentity(bundle.publicIdentity);
+        lastActivity.current = Date.now();
+        return true;
+      }, false),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refreshVaultStatus],
+  );
+
+  const changePassword = React.useCallback(
+    async (current: string, next: string) =>
+      run(async () => {
+        await changeVaultPassword(current, next);
+        return true;
+      }, false),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [refreshVaultStatus],
+  );
+
+  const confirmBackup = React.useCallback(async () => {
+    await run(async () => {
+      await confirmBackupStored();
+      return true;
+    }, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshVaultStatus]);
 
   const checkAnnouncement = React.useCallback(
     (input: AnnouncementInput): StealthCheckResult | null => {
@@ -153,8 +328,7 @@ export function StealthIdentityProvider({
   const proveSpendControl = React.useCallback(
     (input: AnnouncementInput): SpendKeyProof => {
       const bundle = bundleRef.current;
-      if (!bundle) return { ok: false, error: "No identity in this session." };
-
+      if (!bundle) return { ok: false, error: "No identity unlocked." };
       try {
         const { privateKey, stealthAddress } = deriveOneTimeSpendingKey({
           ephemeralPublicKey: input.ephemeralPublicKey,
@@ -163,8 +337,8 @@ export function StealthIdentityProvider({
           expectedStealthAddress: input.stealthAddress,
           schemeId: input.schemeId ?? SCHEME_ID_SECP256K1,
         });
-        // The key is proven and immediately discarded. Signing a real
-        // transaction with it is a later milestone.
+        // Proven, then immediately discarded. Signing a real transaction with
+        // it belongs to a later milestone.
         privateKey.destroy();
         return { ok: true, stealthAddress };
       } catch (err) {
@@ -177,24 +351,44 @@ export function StealthIdentityProvider({
   const value = React.useMemo<StealthIdentityContextValue>(
     () => ({
       publicIdentity,
-      hasIdentity: publicIdentity !== null,
+      hasIdentity: unlocked,
+      vaultExists,
+      isLocked: vaultExists && !unlocked,
+      vaultStatus,
+      busy,
       chainMismatch:
         publicIdentity !== null && publicIdentity.chainId !== activeChainId,
       activeChainName: NETWORKS[activeNetworkKey].shortName,
       error,
       createIdentity,
-      lockIdentity,
+      unlock,
+      lock,
+      requestExport,
+      requestImport,
+      changePassword,
+      confirmBackup,
+      refreshVaultStatus,
       clearError: () => setError(null),
       checkAnnouncement,
       proveSpendControl,
     }),
     [
       publicIdentity,
+      unlocked,
+      vaultExists,
+      vaultStatus,
+      busy,
       activeChainId,
       activeNetworkKey,
       error,
       createIdentity,
-      lockIdentity,
+      unlock,
+      lock,
+      requestExport,
+      requestImport,
+      changePassword,
+      confirmBackup,
+      refreshVaultStatus,
       checkAnnouncement,
       proveSpendControl,
     ],

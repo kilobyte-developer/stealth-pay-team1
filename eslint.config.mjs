@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The Hardhat workspace is a separate npm project with its own toolchain
+    // and generated TypeChain output; it is not part of the Next.js lint pass.
+    "contracts/**",
   ]),
 ]);
 

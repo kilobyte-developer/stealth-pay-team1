@@ -1,0 +1,24 @@
+{
+  "name": "stealthpay-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "StealthPay Avalanche contracts — ERC-5564 Announcer + StealthPaymentRouter. Kept as a separate npm project so Hardhat never enters the Next.js build pipeline.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:announcer:fuji": "hardhat run scripts/deploy-announcer.ts --network fuji",
+    "deploy:router:fuji": "hardhat run scripts/deploy-router.ts --network fuji",
+    "verify:fuji": "hardhat run scripts/verify-deployment.ts --network fuji",
+    "smoke:fuji": "hardhat run scripts/fuji-smoke-payment.ts --network fuji",
+    "check:announcer": "hardhat run scripts/check-canonical-announcer.ts --network fuji",
+    "export:abi": "hardhat run scripts/export-abi.ts"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/contracts": "5.6.1",
+    "dotenv": "^17.0.0",
+    "hardhat": "2.29.1",
+    "typescript": "5.9.3",
+    "ts-node": "^10.9.2"
+  }
+}

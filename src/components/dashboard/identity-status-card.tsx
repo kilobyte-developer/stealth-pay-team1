@@ -7,14 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { SectionLabel } from "@/components/ui/section-label";
 import { MonoBlock } from "@/components/ui/mono";
 import { CopyButton } from "@/components/ui/copy-button";
+import { RecoveryStatusBadge } from "@/components/vault/recovery-status";
 import { useStealthIdentity } from "@/providers/stealth-identity-provider";
 import { NETWORKS } from "@/config/networks";
 import { truncateMiddle } from "@/lib/format";
 
 /** Dashboard summary of the session stealth identity, or a prompt to create one. */
 export function IdentityStatusCard() {
-  const { publicIdentity, createIdentity, lockIdentity, error } =
-    useStealthIdentity();
+  const { publicIdentity, isLocked, vaultStatus, lock } = useStealthIdentity();
 
   if (!publicIdentity) {
     return (
@@ -26,32 +26,24 @@ export function IdentityStatusCard() {
           <div>
             <SectionLabel className="text-grey">Stealth identity</SectionLabel>
             <p className="font-display mt-1 text-sm font-bold">
-              Not created yet
+              {isLocked ? "Locked" : "Not created yet"}
             </p>
           </div>
         </div>
 
         <p className="text-grey mt-4 text-sm leading-relaxed">
-          Generate a stealth identity to get a shareable meta-address. Keys are
-          created in your browser and held in memory for this session only.
+          {isLocked
+            ? "An encrypted vault exists on this device. Unlock it to use your identity."
+            : "Generate a stealth identity to get a shareable meta-address. Your keys are encrypted with a vault password before anything is stored."}
         </p>
 
-        {error ? (
-          <p role="alert" className="text-coral-deep mt-3 text-sm font-bold">
-            {error}
-          </p>
-        ) : null}
-
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button variant="primary" size="md" onClick={() => createIdentity()}>
-            <Sparkles className="size-4" aria-hidden="true" />
-            Create identity
-          </Button>
           <Link
             href="/identity"
-            className={buttonVariants({ variant: "outline", size: "md" })}
+            className={buttonVariants({ variant: "primary", size: "md" })}
           >
-            Learn about the keys
+            <Sparkles className="size-4" aria-hidden="true" />
+            {isLocked ? "Unlock identity" : "Create identity"}
             <ArrowRight className="size-4" aria-hidden="true" />
           </Link>
         </div>
@@ -73,13 +65,17 @@ export function IdentityStatusCard() {
           <div>
             <SectionLabel className="text-grey">Stealth identity</SectionLabel>
             <p className="font-display mt-1 text-sm font-bold">
-              Active this session
+              Unlocked
             </p>
           </div>
         </div>
-        <Badge tone="lime" size="sm">
-          Scheme {publicIdentity.schemeId}
-        </Badge>
+        {vaultStatus ? (
+          <RecoveryStatusBadge status={vaultStatus.recoveryStatus} size="sm" />
+        ) : (
+          <Badge tone="lime" size="sm">
+            Scheme {publicIdentity.schemeId}
+          </Badge>
+        )}
       </div>
 
       <div className="mt-4">
@@ -92,8 +88,8 @@ export function IdentityStatusCard() {
       </div>
 
       <p className="text-grey mt-3 text-xs leading-relaxed">
-        Bound to {network?.shortName ?? `chain ${publicIdentity.chainId}`}. Lost
-        on refresh — there is no backup in this build.
+        Bound to {network?.shortName ?? `chain ${publicIdentity.chainId}`}.
+        Encrypted on this device — a refresh locks it rather than losing it.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -109,7 +105,7 @@ export function IdentityStatusCard() {
         >
           Share
         </Link>
-        <Button variant="ghost" size="sm" onClick={lockIdentity}>
+        <Button variant="ghost" size="sm" onClick={lock}>
           <Lock className="size-3.5" aria-hidden="true" />
           Lock
         </Button>

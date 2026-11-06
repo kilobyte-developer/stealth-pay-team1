@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DemoModeBanner, PageHeader } from "@/components/shared/page-header";
+import { PageHeader } from "@/components/shared/page-header";
 import { SendForm } from "@/components/payments/send-form";
 import { Badge } from "@/components/ui/badge";
 
@@ -18,8 +18,6 @@ export default function SendPage() {
           </Badge>
         }
       />
-
-      <DemoModeBanner />
 
       <SendForm />
     </>

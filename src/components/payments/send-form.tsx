@@ -4,8 +4,10 @@ import * as React from "react";
 import {
   ArrowRight,
   CircleCheck,
+  ExternalLink,
   Info,
   KeyRound,
+  LoaderCircle,
   RefreshCw,
   Send,
   Sparkles,
@@ -16,7 +18,6 @@ import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
 import { SectionLabel } from "@/components/ui/section-label";
 import { MonoBlock, DataList, DataRow } from "@/components/ui/mono";
-import { NotBroadcastNotice } from "@/components/ui/demo-tag";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,8 @@ import { useToast } from "@/components/ui/toast";
 import { ASSETS, NETWORKS } from "@/config/networks";
 import { useActiveNetwork } from "@/providers/wallet-provider";
 import { useStealthIdentity } from "@/providers/stealth-identity-provider";
-import { estimateUsd, formatAmount } from "@/lib/format";
+import { explorerTxUrl, formatAmount } from "@/lib/format";
+import { describeSendBlock, useSendPayment } from "@/hooks/use-send-payment";
 import {
   generateOneTimeStealthAddress,
   parseStealthMetaAddress,
@@ -55,13 +57,13 @@ export function SendForm() {
     error: string | null;
   } | null>(null);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
-  const [prepared, setPrepared] = React.useState(false);
 
   const networkKey = useActiveNetwork();
   const network = NETWORKS[networkKey];
   const chainId = network.chainId as SupportedChainId;
   const { publicIdentity } = useStealthIdentity();
   const { toast } = useToast();
+  const sendState = useSendPayment();
 
   const selectedAsset = ASSETS.find((a) => a.symbol === asset);
   const assetPlanned = Boolean(selectedAsset?.planned);
@@ -120,20 +122,20 @@ export function SendForm() {
     setNote("");
     setTouched({ meta: false, amount: false });
     setDerivation(null);
-    setPrepared(false);
   }
 
-  function handleConfirm() {
-    setConfirmOpen(false);
-    setPrepared(true);
-    toast({
-      tone: "info",
-      title: "Nothing was broadcast",
-      description: "The address is real; no transaction was sent.",
+  async function handleConfirm() {
+    if (!derived) return;
+    await sendState.send({
+      derived,
+      amount,
+      token: selectedAsset?.contract ?? null,
+      tokenDecimals: selectedAsset?.decimals,
     });
+    setConfirmOpen(false);
   }
 
-  if (prepared && derived) {
+  if (sendState.stage === "confirmed" && derived) {
     return (
       <div className="border-ink shadow-brutal-md border-[3px] bg-white p-5 sm:p-7">
         <div className="flex flex-wrap items-center gap-2">
@@ -141,50 +143,59 @@ export function SendForm() {
             <CircleCheck className="size-5" aria-hidden="true" />
           </span>
           <div>
-            <SectionLabel className="text-grey">Payment prepared</SectionLabel>
+            <SectionLabel className="text-grey">Payment sent</SectionLabel>
             <p className="font-display mt-1 text-lg font-bold">
-              Address derived — ready for a future broadcast
+              Confirmed on {network.shortName}
             </p>
           </div>
         </div>
 
-        <NotBroadcastNotice className="mt-5">
-          <strong className="font-display">Not broadcast.</strong> The stealth
-          address and ephemeral key below are genuine ERC-5564 scheme 1 output,
-          but no transaction was signed or submitted to Avalanche{" "}
-          {network.shortName}. Sending requires the payment router contract,
-          which is a later milestone.
-        </NotBroadcastNotice>
-
         <DataList className="mt-5">
-          <DataRow label="Would have sent" mono={false}>
+          <DataRow label="Amount" mono={false}>
             <span className="font-display font-bold">
               {formatAmount(amount)} {asset}
             </span>
           </DataRow>
-          <DataRow label="To stealth address">
+          <DataRow label="Stealth address">
             <span className="break-all">{derived.stealthAddress}</span>
           </DataRow>
-          <DataRow label="Ephemeral public key">
-            <span className="break-all">{derived.ephemeralPublicKey}</span>
+          <DataRow label="Transaction">
+            <span className="break-all">{sendState.txHash}</span>
           </DataRow>
           <DataRow label="View tag" mono>
             {derived.viewTag}
           </DataRow>
-          <DataRow label="Network" mono={false}>
-            {network.name} · chain {network.chainId}
-          </DataRow>
-          {note ? (
-            <DataRow label="Note" mono={false}>
-              {note}
-            </DataRow>
-          ) : null}
         </DataList>
 
-        <Button variant="primary" size="lg" className="mt-6" onClick={reset}>
-          <RefreshCw className="size-4" aria-hidden="true" />
-          Start another
-        </Button>
+        <p className="text-grey mt-4 text-xs leading-relaxed">
+          The router transferred the funds and emitted the ERC-5564 announcement
+          in the same transaction, so the recipient can detect it.
+        </p>
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          {sendState.txHash ? (
+            <a
+              href={explorerTxUrl(networkKey, sendState.txHash)}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="brutal-press border-ink shadow-brutal-xs hover:shadow-brutal-sm font-display inline-flex items-center gap-1.5 border-2 bg-white px-3 py-2 text-xs font-bold uppercase"
+            >
+              View on {network.explorerName}
+              <ExternalLink className="size-3.5" aria-hidden="true" />
+            </a>
+          ) : null}
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => {
+              sendState.reset();
+              reset();
+            }}
+          >
+            <RefreshCw className="size-4" aria-hidden="true" />
+            Send another
+          </Button>
+        </div>
       </div>
     );
   }
@@ -319,7 +330,7 @@ export function SendForm() {
       <div className="space-y-4">
         <div className="border-ink shadow-brutal border-2 bg-white p-5">
           <div className="flex flex-wrap items-start justify-between gap-2">
-            <SectionLabel className="text-grey">Payment preview</SectionLabel>
+            <SectionLabel className="text-grey">Derived destination</SectionLabel>
             {derived ? (
               <Badge tone="lime" size="sm">
                 Real ERC-5564 output
@@ -337,11 +348,6 @@ export function SendForm() {
                   <span className="font-display font-bold">
                     {formatAmount(amount)} {asset}
                   </span>
-                  {asset === "AVAX" ? (
-                    <span className="text-grey mt-0.5 block font-sans text-xs">
-                      ≈ {estimateUsd(amount)} (placeholder rate)
-                    </span>
-                  ) : null}
                 </DataRow>
               </DataList>
 
@@ -387,17 +393,37 @@ export function SendForm() {
               <p className="border-ink bg-paper-2 mt-4 flex items-start gap-2 border-2 p-3 text-[0.7rem] leading-relaxed">
                 <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
                 <span>
-                  These are genuine values from the ERC-5564 scheme 1
-                  derivation. The ephemeral <em>private</em> key was used once
-                  and discarded — it is never shown, stored or published. Fees
-                  are not estimated because no transaction is constructed yet.
+                  Derived with ERC-5564 scheme 1. The ephemeral <em>private</em>
+                  key was used once and discarded — only its public half is
+                  published on-chain. Your wallet will show the exact network fee
+                  before you sign.
                 </span>
               </p>
+
+              {sendState.blocked ? (
+                <p className="border-ink bg-coral/25 mt-5 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
+                  <TriangleAlert
+                    className="mt-0.5 size-4 shrink-0"
+                    aria-hidden="true"
+                  />
+                  {describeSendBlock(sendState.blocked, networkKey)}
+                </p>
+              ) : null}
+
+              {sendState.error ? (
+                <p
+                  role="alert"
+                  className="border-ink bg-coral/25 mt-4 border-2 p-3 text-xs leading-relaxed font-medium"
+                >
+                  {sendState.error}
+                </p>
+              ) : null}
 
               <Button
                 variant="primary"
                 size="lg"
                 className="mt-5 w-full"
+                disabled={sendState.blocked !== null}
                 onClick={() => setConfirmOpen(true)}
               >
                 <Send className="size-4" aria-hidden="true" />
@@ -461,22 +487,35 @@ export function SendForm() {
               {network.name} · chain {network.chainId}
             </DataRow>
             <DataRow label="Network fee" mono={false}>
-              Not estimated
+              Shown by your wallet before signing
             </DataRow>
           </DataList>
 
-          <NotBroadcastNotice className="mt-5">
-            Continuing will <strong>not</strong> sign or send anything. No funds
-            move and no transaction hash is produced.
-          </NotBroadcastNotice>
+          <p className="border-ink bg-paper-2 mt-5 border-2 p-3 text-xs leading-relaxed">
+            Confirming opens your wallet to sign a real transaction on{" "}
+            {network.shortName}. The router transfers the funds and emits the
+            announcement atomically.
+          </p>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleConfirm}>
-              <Send className="size-4" aria-hidden="true" />
-              Confirm
+            <Button
+              variant="primary"
+              disabled={sendState.stage === "signing" || sendState.stage === "pending"}
+              onClick={handleConfirm}
+            >
+              {sendState.stage === "signing" || sendState.stage === "pending" ? (
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Send className="size-4" aria-hidden="true" />
+              )}
+              {sendState.stage === "signing"
+                ? "Check your wallet"
+                : sendState.stage === "pending"
+                  ? "Confirming"
+                  : "Confirm & send"}
             </Button>
           </DialogFooter>
         </DialogContent>

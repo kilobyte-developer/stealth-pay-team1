@@ -7,15 +7,24 @@ import {
   discoverProviders,
   errorCode,
   errorMessage,
+  getLegacyProviders,
+  requestProviderAnnouncements,
   type Eip1193Provider,
   type Eip6963ProviderDetail,
 } from "@/lib/eip1193";
+import {
+  createWalletClient,
+  custom,
+  type EIP1193Provider,
+  type WalletClient,
+} from "viem";
 import {
   DEFAULT_NETWORK,
   NETWORKS,
   networkByChainId,
   toHexChainId,
 } from "@/config/networks";
+import { getChain } from "@/lib/chain/client";
 import type { Hex, NetworkKey } from "@/types";
 
 const LAST_WALLET_KEY = "stealthpay:last-wallet-rdns";
@@ -31,14 +40,26 @@ interface WalletContextValue {
   address: Hex | null;
   chainId: number | null;
   walletName: string | null;
-  /** Wallets this browser actually announced. Empty means none installed. */
+  /**
+   * Wallets discovered in this browser — EIP-6963 announcements when present,
+   * otherwise the legacy `window.ethereum` global. Empty means none found.
+   */
   available: Eip6963ProviderDetail[];
+  /** True when the legacy global is being used because nothing announced. */
+  usingLegacyProvider: boolean;
   error: string | null;
   /** True when connected to a chain StealthPay does not support. */
   unsupportedChain: boolean;
   connect: (uuid: string) => Promise<void>;
   disconnect: () => void;
   switchNetwork: (key: NetworkKey) => Promise<void>;
+  /** Re-asks wallets to announce, for the "scan again" affordance. */
+  rescan: () => void;
+  /**
+   * A viem wallet client over the connected EIP-1193 provider, for signing.
+   * Null when no wallet is connected or the chain is unsupported.
+   */
+  getWalletClient: () => WalletClient | null;
   clearError: () => void;
 }
 
@@ -51,7 +72,6 @@ export function useWallet() {
 }
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
-  const [available, setAvailable] = React.useState<Eip6963ProviderDetail[]>([]);
   const [status, setStatus] = React.useState<WalletStatus>("disconnected");
   const [address, setAddress] = React.useState<Hex | null>(null);
   const [chainId, setChainId] = React.useState<number | null>(null);
@@ -60,16 +80,65 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const activeProvider = React.useRef<Eip1193Provider | null>(null);
 
-  /* ---- Wallet discovery (EIP-6963) ---- */
+  /* ---- Wallet discovery ---- */
+  const [announced, setAnnounced] = React.useState<Eip6963ProviderDetail[]>([]);
+  const [legacy, setLegacy] = React.useState<Eip6963ProviderDetail[]>([]);
+
   React.useEffect(() => {
-    return discoverProviders((detail) => {
-      setAvailable((prev) =>
+    const stop = discoverProviders((detail) => {
+      setAnnounced((prev) =>
         prev.some((p) => p.info.uuid === detail.info.uuid)
           ? prev
           : [...prev, detail],
       );
     });
+
+    // Legacy `window.ethereum` is also polled briefly, because the global is
+    // often injected a tick or two after first paint.
+    const pickUpLegacy = () => setLegacy(getLegacyProviders());
+    pickUpLegacy();
+    const timers = [100, 400, 1200, 2500].map((ms) =>
+      window.setTimeout(pickUpLegacy, ms),
+    );
+
+    return () => {
+      stop();
+      for (const t of timers) window.clearTimeout(t);
+    };
   }, []);
+
+  /**
+   * EIP-6963 announcements win. The legacy global is only surfaced when nothing
+   * announced, so a wallet that supports both is not listed twice.
+   */
+  const available = React.useMemo(
+    () => (announced.length > 0 ? announced : legacy),
+    [announced, legacy],
+  );
+
+  const rescan = React.useCallback(() => {
+    requestProviderAnnouncements();
+    setLegacy(getLegacyProviders());
+  }, []);
+
+  /**
+   * Wraps the connected EIP-1193 provider in a viem wallet client so callers
+   * can sign and send transactions. Returns null unless the wallet is connected
+   * to a chain StealthPay supports — signing against an unknown chain would
+   * send a payment somewhere unintended.
+   */
+  const getWalletClient = React.useCallback((): WalletClient | null => {
+    const provider = activeProvider.current;
+    if (!provider || !address || chainId === null) return null;
+    const network = networkByChainId(chainId);
+    if (!network) return null;
+
+    return createWalletClient({
+      account: address,
+      chain: getChain(network.key),
+      transport: custom(provider as unknown as EIP1193Provider),
+    });
+  }, [address, chainId]);
 
   const reset = React.useCallback(() => {
     activeProvider.current = null;
@@ -276,12 +345,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       chainId,
       walletName,
       available,
+      usingLegacyProvider: announced.length === 0 && legacy.length > 0,
       error,
       unsupportedChain:
         connected && chainId !== null && !networkByChainId(chainId),
       connect,
       disconnect,
       switchNetwork,
+      rescan,
+      getWalletClient,
       clearError: () => setError(null),
     };
   }, [
@@ -290,10 +362,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     chainId,
     walletName,
     available,
+    announced.length,
+    legacy.length,
     error,
     connect,
     disconnect,
     switchNetwork,
+    rescan,
+    getWalletClient,
   ]);
 
   return (

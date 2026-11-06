@@ -14,9 +14,8 @@ export interface RpcStatus {
 /**
  * Polls the configured Avalanche RPC for the current block height.
  *
- * This is one of the few places in the UI preview that reads genuinely live
- * data — it is a plain JSON-RPC call requiring no wallet. Failures are surfaced
- * rather than hidden, so the panel never implies connectivity it does not have.
+ * A plain JSON-RPC call requiring no wallet. Failures are surfaced rather than
+ * hidden, so the panel never implies connectivity it does not have.
  */
 export function useRpcStatus(
   network: NetworkKey,

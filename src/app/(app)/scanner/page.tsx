@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
-import { Radar, ShieldCheck, TriangleAlert } from "lucide-react";
-import { DemoModeBanner, PageHeader } from "@/components/shared/page-header";
-import { ScannerConsole } from "@/components/scanner/scanner-console";
+import { ShieldCheck, TriangleAlert } from "lucide-react";
+import { PageHeader } from "@/components/shared/page-header";
+import { ScannerPanel } from "@/components/scanner/scanner-panel";
 import { AnnouncementChecker } from "@/components/scanner/announcement-checker";
 import { SectionLabel } from "@/components/ui/section-label";
-import { Badge } from "@/components/ui/badge";
 
 export const metadata: Metadata = { title: "Scanner" };
 
@@ -15,22 +14,12 @@ export default function ScannerPage() {
         eyebrow="Scanner"
         title="Your Private Payment Radar."
         description="Announcements are public; knowing which one is yours is not. This is the process that turns a stream of anonymous announcements into your payment list."
-        actions={
-          <Badge tone="coral" size="md">
-            <Radar className="size-3" aria-hidden="true" />
-            Simulated — no RPC scanning
-          </Badge>
-        }
       />
 
-      <DemoModeBanner />
+      <ScannerPanel />
 
-      {/* Real ERC-5564 matching against the session identity. */}
       <AnnouncementChecker />
 
-      <ScannerConsole />
-
-      {/* Architecture honesty */}
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="border-ink bg-ink text-paper border-2 p-5 sm:p-6">
           <div className="flex items-center gap-2.5">
@@ -40,15 +29,15 @@ export default function ScannerPage() {
             </SectionLabel>
           </div>
           <p className="text-paper/75 mt-3 text-sm leading-relaxed">
-            Matching an announcement requires the private viewing key. In
-            StealthPay that computation is designed to happen in the
-            receiver&apos;s own client, so the key never reaches an ordinary
-            backend API.
+            Matching an announcement requires your private viewing key. That
+            computation happens in this browser — the key is handed to the
+            scanner as a callback and never leaves the provider that owns it, so
+            it never reaches a backend.
           </p>
           <p className="text-paper/75 mt-3 text-sm leading-relaxed">
-            A continuously-running server-side scanner would need that key to
-            work while you are offline. That trade-off is a deliberate open
-            decision, not something this preview quietly assumes.
+            The trade-off is that scanning only runs while you are here with the
+            vault unlocked. A continuously-running server-side scanner would
+            need your viewing key, which is a decision we have not taken.
           </p>
         </div>
 
@@ -60,14 +49,14 @@ export default function ScannerPage() {
             </SectionLabel>
           </div>
           <p className="mt-3 text-sm leading-relaxed">
-            Anyone can emit an announcement claiming anything. A match on the
-            view tag and the derived address only means an announcement{" "}
-            <em>addresses</em> you.
+            Announcing is permissionless — anyone can claim anything about any
+            address. A view-tag hit and an address match only mean an
+            announcement <em>addresses</em> you.
           </p>
           <p className="mt-3 text-sm leading-relaxed">
-            Before a payment is shown as received, the real asset transfer to
-            that stealth address must be verified on-chain. The final pipeline
-            stage above exists for exactly that reason.
+            So the scanner reads the actual balance at each matched address and
+            discards anything holding nothing. Only verified balances appear in
+            your payment list.
           </p>
         </div>
       </div>

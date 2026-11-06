@@ -25,9 +25,6 @@ export function Hero() {
           <Badge tone="lime" size="md">
             Fuji Testnet
           </Badge>
-          <Badge tone="muted" size="md">
-            Frontend preview — contracts not yet deployed
-          </Badge>
         </div>
 
         <h1

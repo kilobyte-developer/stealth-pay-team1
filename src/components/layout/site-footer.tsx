@@ -138,9 +138,7 @@ export function SiteFooter() {
               transaction amounts, timing and any onward transfers all remain
               publicly visible on Avalanche. StealthPay is not a mixer, does not
               provide confidential balances, and does not use zero-knowledge
-              proofs. This build is a frontend preview: no smart contracts are
-              deployed and the figures shown in the application are local demo
-              data.
+              proofs.
             </p>
           </div>
 

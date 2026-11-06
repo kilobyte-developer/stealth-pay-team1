@@ -41,8 +41,8 @@ export function FinalCta() {
         </div>
 
         <p className="text-ink/65 mt-7 text-xs leading-relaxed">
-          Frontend preview on Avalanche Fuji. No contracts are deployed yet and
-          in-app figures are demo data.
+          Runs on Avalanche Fuji. Your keys are generated and encrypted in your
+          own browser.
         </p>
       </div>
     </section>

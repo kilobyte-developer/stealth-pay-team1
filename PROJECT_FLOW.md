@@ -1,6 +1,6 @@
 # StealthPay — Project Flow & Technical Blueprint
 
-> **Status of this document:** the **cryptographic engine is implemented** (Milestone 2) — see [docs/CRYPTO_ENGINE.md](./docs/CRYPTO_ENGINE.md). ERC-5564 scheme 1 identity generation, meta-address handling, sender derivation, receiver matching and one-time spending-key recovery all work and are covered by 53 tests. The **frontend is implemented** (Milestone 1). Smart contracts, the announcer deployment, the payment router, the backend, the scanner worker and transaction broadcasting are **not** built — those sections below remain target architecture.
+> **Status of this document:** **Milestones 1–3 are implemented.** The frontend, the ERC-5564 cryptographic engine ([docs/CRYPTO_ENGINE.md](./docs/CRYPTO_ENGINE.md)), the Avalanche smart contracts ([docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)) and the encrypted key-recovery vault ([docs/KEY_RECOVERY.md](./docs/KEY_RECOVERY.md)) all exist and are tested. **Contracts are not yet deployed** — no funded Fuji deployer key was available. The backend, database and live event scanner remain target architecture.
 
 ---
 
@@ -450,6 +450,74 @@ Two behaviours worth noting against §8 and §14:
 
 The scanning architecture question raised in §19 is still open; the engine runs
 client-side today, and nothing holds a viewing key server-side.
+
+## 19b. Implemented Contract Layer (Milestone 3)
+
+Contracts live in [`contracts/`](./contracts/) as a separate npm project, so
+Hardhat never enters the Next.js build.
+
+### ERC5564Announcer
+The ERC-5564 reference Announcer: no state, no funds, no privileges. Its event
+is byte-identical to the canonical deployment —
+`topic0 0x5f0eab80…f4e7`, selector `0x4d1f9583` — both verified against the
+contract live at the canonical address on Avalanche **mainnet**.
+
+**The canonical address has no code on Fuji** (`eth_getCode` → `0x`), and the
+ERC publishes neither the init code nor the salt behind it, so that address
+cannot be reproduced. StealthPay deploys the reference implementation instead
+and records the real address. The script reuses the canonical singleton
+automatically if it ever appears.
+
+### StealthPaymentRouter
+Moves the payment and publishes the announcement **in one transaction**.
+
+| Function | Behaviour |
+|---|---|
+| `payNative(stealthAddress, ephemeralPubKey, viewTag)` | Forwards the full `msg.value`, then announces. |
+| `payERC20(token, stealthAddress, amount, ephemeralPubKey, viewTag)` | Pulls tokens payer → stealth address via `safeTransferFrom`, announces, then forwards any `msg.value` as a gas top-up and announces that separately. |
+
+Properties: immutable Announcer; `SCHEME_ID = 1` as a constant (not a
+parameter, so no unsupported scheme can be announced); no owner/pause/upgrade/
+withdraw; no `receive`/`fallback`, so AVAX cannot enter except through the
+payment functions; `ReentrancyGuard`; exact-amount delta check that rejects
+fee-on-transfer and rebasing tokens.
+
+### Announcement metadata
+Both layouts are 57 bytes and **byte 0 is always the view tag**:
+
+```
+native : viewTag(1) ‖ 0xeeeeeeee(4) ‖ 0xEeee…EEeE(20) ‖ amount(32)
+ERC-20 : viewTag(1) ‖ 0x23b872dd(4) ‖ token(20)        ‖ amount(32)
+```
+
+`0x23b872dd` is `transferFrom`, the operation the router actually performs.
+
+### `caller` is the router, not the payer
+The Announcer records `msg.sender`. When the router announces, that is the
+**router**. Scanners must not read `caller` as the payer; the payer is already
+visible as the transaction's `from`.
+
+### Gas funding (§22 resolved for the sender-funded case)
+`payERC20` accepts an optional `msg.value`, forwarded to the same stealth
+address and announced separately — two parseable announcements for one
+destination. Sender-funded deliberately: topping up later from the receiver's
+own wallet would recreate the link stealth addresses exist to break. Without a
+top-up the token payment still succeeds, but the destination cannot spend until
+it has AVAX, and the UI says so.
+
+## 19c. Implemented Key Recovery (Milestone 3)
+
+§19's volatile-identity problem is resolved. The same ERC-5564 scalars are
+encrypted with **Argon2id** (19 MiB, t=2, p=1 — OWASP minimum) into
+**AES-256-GCM**, with the format version and KDF parameters bound as AAD so a
+work-factor downgrade fails the tag check. Only ciphertext is persisted, in
+IndexedDB. A `.stealthpay` file enables cross-device restore; restoring
+recomputes the public keys from the private scalars and rebuilds the
+meta-address, rejecting any mismatch rather than partially restoring.
+
+A refresh now **locks** the identity instead of destroying it. There is no
+password reset: lose both the file and the password and the identity is gone.
+Full threat model in [docs/KEY_RECOVERY.md](./docs/KEY_RECOVERY.md).
 
 ## 20. Privacy Model
 

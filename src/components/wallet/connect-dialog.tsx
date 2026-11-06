@@ -1,7 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { CircleAlert, ExternalLink, LoaderCircle, Wallet } from "lucide-react";
+import {
+  CircleAlert,
+  ExternalLink,
+  LoaderCircle,
+  RefreshCw,
+  Wallet,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +16,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { useWallet } from "@/providers/wallet-provider";
 
 const WALLET_DOWNLOADS = [
@@ -24,7 +30,7 @@ export function ConnectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { available, connect, status, error, clearError } = useWallet();
+  const { available, connect, status, error, clearError, rescan } = useWallet();
   const [pending, setPending] = React.useState<string | null>(null);
 
   async function handleConnect(uuid: string) {
@@ -101,13 +107,27 @@ export function ConnectDialog({
           <div className="border-ink border-2 border-dashed p-5 text-center">
             <Wallet className="mx-auto size-7" aria-hidden="true" />
             <p className="font-display mt-3 text-sm font-bold">
-              No injected wallet detected
+              No wallet detected yet
             </p>
             <p className="text-grey mx-auto mt-1.5 max-w-xs text-xs leading-relaxed">
-              This browser did not announce any EIP-6963 wallet. Install one of
-              the following, then reopen this dialog.
+              Extensions sometimes load after the page does. Try scanning again
+              before installing anything.
             </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
+
+            <Button
+              variant="primary"
+              size="md"
+              className="mt-4"
+              onClick={rescan}
+            >
+              <RefreshCw className="size-4" aria-hidden="true" />
+              Scan again
+            </Button>
+
+            <p className="text-grey mx-auto mt-4 max-w-xs text-xs leading-relaxed">
+              Still nothing? Install one of these, then reopen this dialog.
+            </p>
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
               {WALLET_DOWNLOADS.map((w) => (
                 <a
                   key={w.name}
@@ -124,14 +144,9 @@ export function ConnectDialog({
           </div>
         )}
 
-        <p className="text-grey mt-5 flex items-start gap-2 text-[0.7rem] leading-relaxed">
-          <Badge tone="muted" size="xs" className="shrink-0">
-            UI preview
-          </Badge>
-          <span>
-            Connecting is a real wallet session. Balances and payment history in
-            this build are local demo data and are not read from your account.
-          </span>
+        <p className="text-grey mt-5 text-[0.7rem] leading-relaxed">
+          StealthPay reads your address and chain only. Your stealth keys are a
+          separate key system and are never derived from this wallet.
         </p>
       </DialogContent>
     </Dialog>

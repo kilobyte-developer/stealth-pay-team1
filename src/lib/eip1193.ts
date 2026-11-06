@@ -72,16 +72,90 @@ export function discoverProviders(
   };
 
   window.addEventListener("eip6963:announceProvider", handler);
-  window.dispatchEvent(new Event("eip6963:requestProvider"));
 
-  return () => window.removeEventListener("eip6963:announceProvider", handler);
+  /*
+   * Ask repeatedly, not once.
+   *
+   * A wallet only announces in response to `eip6963:requestProvider`. Extension
+   * content scripts frequently attach their listener AFTER the app hydrates, so
+   * a single dispatch at mount can land before anything is listening — and then
+   * no wallet is ever discovered. Re-asking on a short schedule, plus on `load`
+   * and when the tab becomes visible, closes that race.
+   */
+  const request = () => window.dispatchEvent(new Event("eip6963:requestProvider"));
+  request();
+
+  const delays = [50, 150, 400, 800, 1500, 2500];
+  const timers = delays.map((ms) => window.setTimeout(request, ms));
+
+  window.addEventListener("load", request);
+  document.addEventListener("visibilitychange", request);
+
+  return () => {
+    window.removeEventListener("eip6963:announceProvider", handler);
+    window.removeEventListener("load", request);
+    document.removeEventListener("visibilitychange", request);
+    for (const t of timers) window.clearTimeout(t);
+  };
 }
 
-/** Known wallet hints used to label an unnamed legacy `window.ethereum`. */
-export const WALLET_HINTS: Record<string, string> = {
-  "io.metamask": "MetaMask",
-  "app.core.extension": "Core",
-  "com.coinbase.wallet": "Coinbase Wallet",
-  "com.brave.wallet": "Brave Wallet",
-  "io.rabby": "Rabby",
-};
+/** Re-asks wallets to announce themselves. */
+export function requestProviderAnnouncements(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+}
+
+/** Legacy injected provider shape, pre-EIP-6963. */
+interface LegacyEthereumProvider extends Eip1193Provider {
+  isMetaMask?: boolean;
+  isCoinbaseWallet?: boolean;
+  isRabby?: boolean;
+  isBraveWallet?: boolean;
+  isAvalanche?: boolean;
+  /** Some environments expose several wallets here. */
+  providers?: LegacyEthereumProvider[];
+}
+
+function labelLegacyProvider(provider: LegacyEthereumProvider): string {
+  if (provider.isAvalanche) return "Core";
+  if (provider.isMetaMask) return "MetaMask";
+  if (provider.isCoinbaseWallet) return "Coinbase Wallet";
+  if (provider.isRabby) return "Rabby";
+  if (provider.isBraveWallet) return "Brave Wallet";
+  return "Injected wallet";
+}
+
+/**
+ * Fallback discovery via `window.ethereum`.
+ *
+ * EIP-6963 is the modern path, but plenty of wallets still only expose the
+ * legacy global: older extension builds, mobile in-app browsers, and some
+ * Brave configurations. Without this, those users simply cannot connect.
+ *
+ * Returns synthesized details shaped like EIP-6963 announcements so the rest of
+ * the wallet layer needs no special-casing.
+ */
+export function getLegacyProviders(): Eip6963ProviderDetail[] {
+  if (typeof window === "undefined") return [];
+
+  const root = (window as { ethereum?: LegacyEthereumProvider }).ethereum;
+  if (!root || typeof root.request !== "function") return [];
+
+  // `providers` is the multi-wallet convention; otherwise it is a single one.
+  const candidates =
+    Array.isArray(root.providers) && root.providers.length > 0
+      ? root.providers
+      : [root];
+
+  return candidates
+    .filter((p) => p && typeof p.request === "function")
+    .map((provider, index) => ({
+      info: {
+        uuid: `legacy:${index}`,
+        name: labelLegacyProvider(provider),
+        icon: "",
+        rdns: `legacy.injected.${index}`,
+      },
+      provider,
+    }));
+}

@@ -1,6 +1,6 @@
 # StealthPay — Technology Stack
 
-> This document describes the StealthPay stack. The **frontend (Milestone 1)** and the **cryptographic engine (Milestone 2)** are implemented and their versions below are the ones actually installed. Contracts, backend, database and scanner remain **planned** — those entries are recommendations to validate when built. See [docs/CRYPTO_ENGINE.md](./docs/CRYPTO_ENGINE.md).
+> This document describes the StealthPay stack. The **frontend (M1)**, **cryptographic engine (M2)**, **smart contracts (M3)** and **encrypted key recovery (M3)** are implemented, and their versions below are the ones actually installed. Contracts are **built and locally tested but not yet deployed**. The backend, database and scanner remain **planned**. See [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) and [docs/KEY_RECOVERY.md](./docs/KEY_RECOVERY.md).
 
 ---
 
@@ -9,9 +9,9 @@
 | Category | Technology | Purpose | MVP / Supporting / Optional |
 |---|---|---|---|
 | Blockchain network | Avalanche C-Chain + Fuji Testnet | Execution environment for all contracts and payments | **MVP** |
-| Smart contract language | Solidity | Implements `StealthPaymentRouter` and the `ERC5564Announcer` | **MVP** |
-| Contract tooling | Hardhat | Compile, test, deploy contracts | **MVP** |
-| Contract libraries | OpenZeppelin Contracts | Audited building blocks (safe ERC-20 handling, access control) | **MVP** |
+| Smart contract language | Solidity 0.8.28 (`evmVersion: cancun`) | `StealthPaymentRouter` + `ERC5564Announcer` | **Implemented, not deployed** |
+| Contract tooling | Hardhat 2.29.1 + toolbox 5 (ethers v6, chai matchers) | Compile, test, deploy; precise event-log assertions | **Implemented** |
+| Contract libraries | OpenZeppelin Contracts 5.6.1 | `SafeERC20`, `ReentrancyGuard` | **Implemented** |
 | Stealth address standard | ERC-5564 | Defines the announcement interface and SECP256k1 derivation scheme | **MVP** |
 | Frontend framework | Next.js (React, TypeScript) | Sender + receiver UI, API routes | **MVP** |
 | Styling | Tailwind CSS + shadcn/ui | Dashboard and payment interfaces | **MVP** |
@@ -22,7 +22,11 @@
 | Address derivation | `viem` 2.x (`publicKeyToAddress`, `keccak256`) | Canonical EVM address derivation and EIP-55 checksums | **Implemented** |
 | Backend runtime | Node.js + TypeScript | API routes, scanner worker | **MVP** |
 | Scanner | Standalone worker using Viem | Reads Announcement events, detects payments | **MVP** |
-| Database | Supabase (PostgreSQL) | Public metadata, announcements, detected payments, checkpoints | **MVP** |
+| Key derivation | Argon2id via `hash-wasm` 4.12 (19 MiB / t=2 / p=1) | Derives the vault AES key from the password | **Implemented** |
+| Vault encryption | AES-256-GCM via Web Crypto `SubtleCrypto` | Encrypts the identity at rest, AAD-bound | **Implemented** |
+| Local secret storage | IndexedDB via `idb` 8 | Stores ONLY the ciphertext envelope | **Implemented** |
+| Backup format | `STEALTHPAY_ENCRYPTED_BACKUP` v1, `.stealthpay` | Versioned encrypted off-device backup | **Implemented** |
+| Database | Supabase (PostgreSQL) | Public metadata, announcements, detected payments, checkpoints | Planned |
 | Frontend hosting | Vercel | Hosts the Next.js app | **MVP** |
 | Scanner hosting | Railway (or similar) | Hosts the long-running scanner worker | Supporting |
 | Testing (contracts) | Hardhat test suite | Contract correctness | **MVP** |

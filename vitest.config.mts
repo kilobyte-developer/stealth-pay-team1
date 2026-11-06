@@ -8,9 +8,15 @@ export default defineConfig({
     },
   },
   test: {
-    // The crypto engine is pure TypeScript with no DOM dependency.
+    // The crypto engine and vault are pure TypeScript with no DOM dependency.
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Chain integration spawns a Hardhat node and must not compete with the
+    // unit suite for CPU/memory. Run it via `npm run test:integration`.
+    exclude: ["src/test/integration/**"],
+    setupFiles: ["./src/test/setup-vault.ts"],
+    // Argon2id at the OWASP work factor is intentionally slow.
+    testTimeout: 30_000,
     server: {
       deps: {
         // @scopelift/stealth-address-sdk@1.0.0-beta.5 ships ESM with

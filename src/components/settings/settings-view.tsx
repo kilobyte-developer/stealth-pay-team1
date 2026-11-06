@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { SectionLabel } from "@/components/ui/section-label";
 import { CopyButton } from "@/components/ui/copy-button";
 import { ConnectDialog } from "@/components/wallet/connect-dialog";
+import { SecuritySettings } from "@/components/vault/security-settings";
 import { useRpcStatus } from "@/hooks/use-rpc-status";
 import { useActiveNetwork, useWallet } from "@/providers/wallet-provider";
 import { CONTRACTS, NETWORKS, SUPPORTED_NETWORKS } from "@/config/networks";
@@ -87,6 +88,7 @@ export function SettingsView() {
   const rpc = useRpcStatus(networkKey, 45_000);
   const [connectOpen, setConnectOpen] = React.useState(false);
   const connected = status === "connected" || status === "switching";
+  const announcerConfigured = CONTRACTS[networkKey].announcer !== null;
 
   return (
     <div className="space-y-6">
@@ -97,7 +99,7 @@ export function SettingsView() {
           hint={
             connected
               ? `Connected with ${walletName ?? "an injected wallet"}.`
-              : "No wallet connected. The preview runs on demo data regardless."
+              : "Not connected. Receiving works without a wallet; sending and network switching need one."
           }
         >
           {connected && address ? (
@@ -130,7 +132,7 @@ export function SettingsView() {
 
         <Row
           label="Network preference"
-          hint="Fuji is the default for all development and demos. Switching requires a connected wallet."
+          hint="Fuji is the default. Switching requires a connected wallet."
         >
           {SUPPORTED_NETWORKS.map((n) => (
             <Button
@@ -146,15 +148,6 @@ export function SettingsView() {
         </Row>
 
         <Row
-          label="Display currency"
-          hint="Fiat estimates use a fixed placeholder rate, not a live price feed."
-        >
-          <Badge tone="muted" size="md">
-            USD · estimated
-          </Badge>
-        </Row>
-
-        <Row
           label="Theme"
           hint="StealthPay ships a single high-contrast light theme. A dark variant is not part of this build."
         >
@@ -165,7 +158,10 @@ export function SettingsView() {
         </Row>
       </SettingsSection>
 
-      {/* ---------- Security ---------- */}
+      {/* ---------- Security & backup (encrypted vault) ---------- */}
+      <SecuritySettings />
+
+      {/* ---------- Security posture ---------- */}
       <SettingsSection id="security" title="Security" icon={ShieldCheck}>
         <Row
           label="Private key handling"
@@ -179,7 +175,7 @@ export function SettingsView() {
 
         <Row
           label="Key backup"
-          hint="Backup and identity regeneration live on the Stealth Identity page, behind an explicit acknowledgement step."
+          hint="Export an encrypted backup, import one, or change your vault password in Security & backup above."
         >
           <Link
             href="/identity"
@@ -191,7 +187,7 @@ export function SettingsView() {
 
         <Row
           label="Session management"
-          hint="StealthPay keeps no server session. The only persisted value is which wallet you last connected, stored in this browser so it can reconnect silently."
+          hint="No server session exists. The only values kept in this browser are which wallet you last connected and your encrypted vault."
         >
           <Badge tone="white" size="md">
             No server session
@@ -296,11 +292,11 @@ export function SettingsView() {
         </Row>
 
         <Row
-          label="Build status"
-          hint="Frontend preview. No smart contracts deployed, no backend, no scanner worker. In-app balances and transactions are local demo data."
+          label="Payment detection"
+          hint="Scanning reads ERC-5564 Announcement logs with your private viewing key, in this browser."
         >
-          <Badge tone="coral" size="md">
-            UI milestone
+          <Badge tone={announcerConfigured ? "lime" : "muted"} size="md">
+            {announcerConfigured ? "Active" : "Awaiting Announcer address"}
           </Badge>
         </Row>
 

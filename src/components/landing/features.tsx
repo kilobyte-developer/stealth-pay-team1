@@ -102,7 +102,7 @@ export function Features() {
         <Badge tone="lime" size="sm">
           MVP scope
         </Badge>
-        <span className="text-grey text-xs">Targeted for the Fuji demo</span>
+        <span className="text-grey text-xs">Available now on Fuji</span>
         <span className="bg-ink/15 hidden h-5 w-0.5 sm:block" />
         <Badge tone="muted" size="sm">
           Planned
@@ -151,10 +151,10 @@ export function Features() {
       </div>
 
       <p className="border-ink bg-paper-2 mt-8 border-2 p-4 text-sm leading-relaxed">
-        <strong className="font-display">Current build status:</strong> this is
-        a frontend preview. The interface is real and navigable, but no smart
-        contracts have been deployed and the figures shown inside the
-        application are local demo data.
+        <strong className="font-display">Scope:</strong> StealthPay targets
+        native AVAX first. ERC-20 payments are supported by the payment router
+        but need native AVAX at the destination before the tokens can be moved,
+        which is why they are listed separately above.
       </p>
     </Section>
   );

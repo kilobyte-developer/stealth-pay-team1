@@ -92,9 +92,8 @@ export function NetworkCard() {
       </DataList>
 
       <p className="border-ink bg-paper-2 mt-4 border-2 p-2.5 text-[0.7rem] leading-relaxed">
-        The block height above is a genuine live reading from the public
-        Avalanche RPC. Balances and payment history elsewhere in this build are
-        demo data.
+        Block height is read live from the public Avalanche RPC. Fuji is a test
+        network — never send real assets to it.
       </p>
     </div>
   );

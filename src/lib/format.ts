@@ -1,4 +1,4 @@
-import { DEMO_AVAX_USD_RATE, NETWORKS } from "@/config/networks";
+import { NETWORKS } from "@/config/networks";
 import type { NetworkKey } from "@/types";
 
 /** Shorten a hash or address for display: 0x1234…cdef */
@@ -19,20 +19,6 @@ export function formatAmount(amount: string, maxFractionDigits = 4): string {
   return n.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: maxFractionDigits,
-  });
-}
-
-/**
- * Estimated fiat value from a fixed placeholder rate. Always render alongside
- * an "estimated" qualifier — this is not a live price feed.
- */
-export function estimateUsd(avaxAmount: string | number): string {
-  const n = typeof avaxAmount === "string" ? Number(avaxAmount) : avaxAmount;
-  if (!Number.isFinite(n)) return "—";
-  return (n * DEMO_AVAX_USD_RATE).toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
   });
 }
 

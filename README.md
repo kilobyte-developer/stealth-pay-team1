@@ -4,7 +4,7 @@
 
 > Built for **Team1 India – Speedrun 2026** on Avalanche (*Build Anything on Avalanche* cycle).
 
-> **Project status:** **Milestone 1 (frontend)** and **Milestone 2 (cryptographic engine)** are complete. Real ERC-5564 scheme 1 stealth address generation, detection and one-time spending-key recovery work in the browser and are covered by 53 tests — see [docs/CRYPTO_ENGINE.md](./docs/CRYPTO_ENGINE.md). Smart contracts, the backend, the scanner worker and **transaction broadcasting are not built**; nothing is deployed, and balances/transaction history remain demo data. See [Project Status](#project-status).
+> **Project status:** **Milestones 1–3 complete.** Frontend, ERC-5564 cryptographic engine, Avalanche smart contracts, and an encrypted key-recovery vault are all implemented and tested (89 unit + 39 contract + 5 cross-layer integration tests). **Contracts are NOT yet deployed to Fuji** — no funded deployer key was available, and no address is invented. Not audited. Not mainnet-ready. See [Project Status](#project-status).
 
 ---
 
@@ -127,13 +127,13 @@ flowchart TB
 | UI | Custom Neo-Brutalist design system, Radix primitives (dialog, dropdown), lucide-react, `qrcode.react` | **Built** |
 | Wallets | EIP-6963 discovery + EIP-1193 requests, viem types — MetaMask & Core compatible | **Built** |
 | Blockchain reads | Public Avalanche JSON-RPC (`eth_blockNumber` health check) | **Built** |
-| Blockchain | Avalanche C-Chain, Solidity, Hardhat, OpenZeppelin, ERC-5564 | Planned |
+| Contracts | Solidity 0.8.28, Hardhat 2.29, OpenZeppelin 5.6 — `ERC5564Announcer` + `StealthPaymentRouter` | **Built, not deployed** |
+| Key recovery | Argon2id (`hash-wasm`) + AES-256-GCM (Web Crypto), IndexedDB (`idb`) | **Built** |
 | Cryptography | `@scopelift/stealth-address-sdk` 1.0.0-beta.5, `@noble/secp256k1`, viem — ERC-5564 scheme 1 | **Built** |
 | Backend | Node.js, TypeScript, Next.js API routes, standalone scanner worker | Planned |
 | Database | Supabase (PostgreSQL) — public metadata only, never private keys | Planned |
 | Deployment | Vercel (frontend), Railway or similar (scanner worker), Hardhat (contracts) | Planned |
-| Testing (crypto) | Vitest 5 — 53 tests, 7 files | **Built** |
-| Testing (contracts) | Hardhat tests | Planned |
+| Testing | Vitest 5 (89 unit, 5 integration) + Hardhat (39 contract) | **Built** |
 
 Full rationale for every choice is in **[TECH_STACK.md](./TECH_STACK.md)**.
 
@@ -244,45 +244,75 @@ The scanner worker is not implemented yet, so there is no second process to run.
 
 ## Smart Contract Deployment
 
-> Planned workflow using Hardhat, targeting Fuji first. The `contracts/` project does not exist yet.
+The `contracts/` workspace is a **separate npm project** so Hardhat never enters the Next.js build.
 
 ```bash
 cd contracts
-npx hardhat compile
-npx hardhat run scripts/deploy.ts --network fuji
+cp .env.example .env        # add a DEDICATED Fuji deployer key
+npm install
+npm run compile
+npm test
+npm run check:announcer     # is the canonical Announcer on this chain?
+npm run deploy:announcer:fuji
+npm run deploy:router:fuji
+npm run verify:fuji
+npm run export:abi          # refresh src/config/abi for the frontend
 ```
 
-Deployment will:
-1. Verify whether the official ERC-5564 reference `ERC5564Announcer` is already deployed at its deterministic address on Fuji; deploy it there if not.
-2. Deploy `StealthPaymentRouter`, configured to call that `ERC5564Announcer`.
-3. Record both addresses below once deployed.
+Solidity 0.8.28, `evmVersion: cancun` — chosen because Fuji block headers were
+probed and carry Cancun fields (`blobGasUsed`, `excessBlobGas`,
+`parentBeaconBlockRoot`) but not Prague. Full reasoning in
+[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md).
+
+**Canonical Announcer status (verified, not assumed):**
+
+| Network | `eth_getCode` at `0x55649E…45564` | Outcome |
+|---|---|---|
+| Avalanche mainnet (43114) | 709 bytes | Deployed |
+| Avalanche **Fuji** (43113) | `0x` | **Not deployed** |
+
+The ERC does not publish the init code or salt behind its canonical address, so
+that address cannot be reproduced on Fuji. We therefore deploy the reference
+implementation and record the real address. Its event signature is
+byte-identical to canonical (`topic0 0x5f0eab80…f4e7`, selector `0x4d1f9583`),
+so standards-compatible scanners work unmodified.
+
+The deploy script reuses the canonical singleton automatically if code ever
+appears there.
 
 **Deployed Contracts (Fuji Testnet):**
 
 | Contract | Address | Explorer Link |
 |---|---|---|
-| `ERC5564Announcer` | _TBD — not yet deployed_ | _TBD_ |
-| `StealthPaymentRouter` | _TBD — not yet deployed_ | _TBD_ |
+| `ERC5564Announcer` | _not deployed — needs a funded Fuji deployer key_ | — |
+| `StealthPaymentRouter` | _not deployed — needs a funded Fuji deployer key_ | — |
+
+No address is invented here. `npm run deploy:*` aborts with a clear message
+when `DEPLOYER_PRIVATE_KEY` is unset or the account is unfunded.
 
 ## Testing
 
 ```bash
-npm test           # Vitest — 53 crypto-engine tests (7 files)
-npm run typecheck  # tsc --noEmit, strict mode
-npm run lint       # ESLint (eslint-config-next, flat config)
-npm run build      # production build + type check + prerender all routes
+npm test               # Vitest — 89 unit tests (crypto engine + vault)
+npm run test:contracts # Hardhat — 39 contract tests
+npm run test:integration # 5 cross-layer tests (spawns a local Hardhat node)
+npm run test:all       # all three, in order
+npm run typecheck      # tsc --noEmit, strict mode
+npm run lint           # ESLint (flat config)
+npm run build          # production build + type check + prerender all routes
 ```
+
+Integration tests are a separate run because they spawn a real Hardhat node;
+sharing a run with the unit suite starves it of CPU during startup. They
+require `contracts/artifacts`, so run `npm --prefix contracts run compile`
+first.
 
 The crypto suite covers key generation, meta-address encoding/parsing, sender
 derivation, receiver scanning, spending-key derivation, the full end-to-end
 round trip, and SDK interoperability/convention pinning. Breakdown in
 [docs/CRYPTO_ENGINE.md §6](./docs/CRYPTO_ENGINE.md).
 
-Planned once the contracts land:
 
-```bash
-cd contracts && npx hardhat test   # contract tests (not yet written)
-```
 
 ## Demo & Deployment
 
@@ -320,10 +350,12 @@ cd contracts && npx hardhat test   # contract tests (not yet written)
 - [x] Landing page and all seven dashboard screens built.
 - [x] Wallet connection (EIP-6963 discovery, address display, Fuji/Mainnet switching, disconnect).
 - [x] Meta-address sharing UI with QR code generation.
-- [ ] Hardhat project and scanner worker scaffolding.
+- [x] Hardhat workspace, `ERC5564Announcer` + `StealthPaymentRouter`, 39 contract tests (Milestone 3).
+- [x] Encrypted vault: Argon2id + AES-256-GCM, IndexedDB, downloadable backup, cross-device recovery (Milestone 3).
+- [ ] Deploy contracts to Fuji (needs a funded testnet deployer key).
+- [ ] Scanner worker.
 - [x] Client-side stealth key generation and full ERC-5564 scheme 1 derivation (Milestone 2).
 - [x] Receiver announcement matching and one-time spending-key recovery, with a verified round trip.
-- [ ] `StealthPaymentRouter` + `ERC5564Announcer` deployed to Fuji.
 - [ ] Native AVAX payment flow (send → announce → detect → forward) working end-to-end on Fuji.
 - [ ] Receiver dashboard with detected-payment list.
 - [ ] Cryptographic test vectors validated against the ERC-5564 reference implementation.
@@ -336,30 +368,28 @@ cd contracts && npx hardhat test   # contract tests (not yet written)
 To keep this README honest and avoid overstating progress:
 
 **Built and working**
-- **Cryptographic engine (Milestone 2):** real ERC-5564 scheme 1 (SECP256k1) identity generation, meta-address build/parse, sender one-time address derivation, receiver announcement matching, and one-time spending-key recovery — all client-side. 53 tests across 7 files, including a full Alice → Bob → Alice round trip proving the recovered key controls exactly the address the sender generated. See [docs/CRYPTO_ENGINE.md](./docs/CRYPTO_ENGINE.md).
-- The full frontend: landing page plus `/dashboard`, `/receive`, `/send`, `/activity`, `/identity`, `/scanner`, `/settings`.
-- A coherent Neo-Brutalist design system (tokens, components, responsive desktop/tablet/mobile layouts).
-- Real wallet connection via EIP-6963/EIP-1193 — connect, show address, switch to Fuji or Mainnet, disconnect.
-- A genuine live read of the public Avalanche RPC (`eth_blockNumber`) on the Dashboard and Settings.
-- Real QR code generation and download, encoding the actual stealth meta-address.
+- **Frontend (M1):** landing page plus `/dashboard`, `/receive`, `/send`, `/activity`, `/identity`, `/scanner`, `/settings`, in a coherent Neo-Brutalist design system.
+- **Cryptographic engine (M2):** real ERC-5564 scheme 1 (SECP256k1) identity generation, meta-address handling, sender derivation, receiver matching and one-time spending-key recovery. See [docs/CRYPTO_ENGINE.md](./docs/CRYPTO_ENGINE.md).
+- **Smart contracts (M3):** `ERC5564Announcer` (canonical event signature) and `StealthPaymentRouter` (native AVAX, ERC-20, optional AVAX gas top-up, atomic payment + announcement). 39 Hardhat tests. See [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md).
+- **Encrypted key recovery (M3):** Argon2id + AES-256-GCM vault in IndexedDB, downloadable `.stealthpay` backup, cross-device restore, password change, auto-lock. A refresh now **locks** the identity instead of destroying it. See [docs/KEY_RECOVERY.md](./docs/KEY_RECOVERY.md).
+- **Cross-layer proof:** 5 integration tests drive the real engine against the real contracts on a local chain — including one where a **vault-recovered identity claims a payment announced before the device was wiped**.
+- Real wallet connection (EIP-6963/EIP-1193) and a live Avalanche RPC block-height read.
 
-**Still demo data, not real**
-- Balances, payment history, transaction hashes, block numbers and scanner counters come from [`src/data/mock/`](src/data/mock/). Every app screen carries a persistent "Frontend preview" banner.
-- The Scanner's event feed is a scripted simulation — it performs no RPC log scanning. (Its *announcement checker* is real crypto.)
+**Not deployed**
+- **No contracts exist on Fuji yet.** The canonical ERC-5564 Announcer is confirmed absent on Fuji (`eth_getCode` → `0x`), and deploying ours requires a funded testnet deployer key that was not available. The scripts refuse to run rather than fabricate an address. Every address field in this repo is empty or marked pending.
 
-**Not built**
-- Smart contracts and deployments, the payment router, the ERC-5564 Announcer, the backend API, Supabase, the scanner worker, and **transaction broadcasting**. The Send flow derives a real address but never signs or submits anything, and never fabricates a transaction hash.
+**Still demo data**
+- Dashboard balances, payment history and the Scanner's event feed remain local mock data; live chain scanning is a later milestone. The Scanner's *announcement checker* is real crypto.
 
-**Security posture — read this**
-- Private keys (viewing, spending, ephemeral, derived one-time) are generated and used **only in the browser**. They are never sent to an API route, written to a database, placed in `localStorage`/`sessionStorage`, logged, or encoded into a URL or QR code.
-- Stealth keys are a **separate key system** from the connected MetaMask/Core account and are never derived from it.
-- The identity lives in memory for the session only. **There is no backup or recovery** — a refresh destroys it. That is deliberate for this milestone.
-- The engine is **not independently audited** and depends on a **beta** SDK (`1.0.0-beta.5`, pinned). Fuji testnet only.
+**Security posture**
+- Private keys are generated and used only in the browser; never sent to an API, never written to a database, never in `localStorage`/`sessionStorage`/cookies, never logged.
+- Only Argon2id+AES-GCM ciphertext is persisted. A test inspects the actual IndexedDB record to confirm no plaintext key, password or meta-address is present.
+- Stealth keys are a separate key system from the connected wallet and are never derived from it.
+- **There is no password reset.** Lose both the backup file and its password and the identity is unrecoverable by anyone, by design.
+- **Not audited.** Depends on a **beta** SDK (`1.0.0-beta.5`, pinned). Fuji testnet only.
 
 **Not yet decided**
-- The scanning architecture (fully client-side vs. a protected server-side scanner — see [PROJECT_FLOW.md §19](./PROJECT_FLOW.md#19-backend-and-database-architecture)), and the ERC-20 gas-funding mechanism to ship first.
-
-**No contracts are deployed.** No address in this document is real until the deployment table above is filled in.
+- Scanner architecture (client-side vs. a protected server-side scanner), and the supported-token policy.
 
 ## Team & Acknowledgements
 
@@ -376,5 +406,7 @@ Built for **Team1 India – Speedrun 2026** ([event details](https://docs.avax.n
 - [Avalanche Fuji Testnet Explorer](https://build.avax.network/explorer/fuji/c-chain)
 - [Team1 India – Speedrun 2026](https://docs.avax.network/events/3f8d455d-1eb5-425b-b859-4261a0ff8ad6)
 - [docs/CRYPTO_ENGINE.md](./docs/CRYPTO_ENGINE.md) — cryptographic engine: architecture, verified conventions, security limits
+- [docs/KEY_RECOVERY.md](./docs/KEY_RECOVERY.md) — encrypted vault, backup format, threat model
+- [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) — contracts, Avalanche EVM target, deployment procedure
 - [PROJECT_FLOW.md](./PROJECT_FLOW.md) — full technical blueprint
 - [TECH_STACK.md](./TECH_STACK.md) — detailed stack rationale

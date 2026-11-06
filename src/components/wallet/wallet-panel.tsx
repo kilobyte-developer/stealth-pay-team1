@@ -3,7 +3,6 @@
 import * as React from "react";
 import { Power, TriangleAlert, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { CopyButton } from "@/components/ui/copy-button";
 import { ConnectDialog } from "@/components/wallet/connect-dialog";
 import { NetworkSelector } from "@/components/wallet/network-selector";
@@ -76,16 +75,13 @@ export function WalletPanel() {
             {status === "connecting" ? "Connecting" : "Connect Wallet"}
           </Button>
           <p className="text-grey text-[0.65rem] leading-relaxed">
-            Optional for this preview — the interface runs on demo data without
-            a wallet.
+            Needed to send payments and switch networks. Receiving works without
+            one.
           </p>
           <ConnectDialog open={open} onOpenChange={setOpen} />
         </>
       )}
 
-      <Badge tone="muted" size="xs" className="w-full justify-center">
-        UI preview build
-      </Badge>
     </div>
   );
 }

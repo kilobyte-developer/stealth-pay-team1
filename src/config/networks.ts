@@ -1,3 +1,4 @@
+import { getAddress, isAddress, type Address } from "viem";
 import type { AssetInfo, NetworkConfig, NetworkKey } from "@/types";
 
 /**
@@ -56,19 +57,43 @@ export const ASSETS: AssetInfo[] = [
 export const NATIVE_ASSET = ASSETS[0];
 
 /**
- * Indicative AVAX→USD rate used only to render "estimated value" on demo data.
- * This is a fixed placeholder, NOT a live price feed.
+ * Deployed contract addresses, supplied per network at build time.
+ *
+ * Reading these from the environment means the app activates on-chain features
+ * the moment real addresses exist — no code change, and no hardcoded address
+ * that could drift from what is actually deployed. Absent values leave the
+ * on-chain features correctly inert.
  */
-export const DEMO_AVAX_USD_RATE = 27.4;
+function readAddress(value: string | undefined): Address | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return isAddress(trimmed) ? getAddress(trimmed) : null;
+}
 
-/**
- * Contract addresses are intentionally empty: nothing has been deployed yet.
- * See README.md §Smart Contract Deployment.
- */
 export const CONTRACTS: Record<
   NetworkKey,
-  { announcer: string | null; router: string | null }
+  { announcer: Address | null; router: Address | null }
 > = {
-  fuji: { announcer: null, router: null },
-  mainnet: { announcer: null, router: null },
+  fuji: {
+    announcer: readAddress(process.env.NEXT_PUBLIC_FUJI_ANNOUNCER_ADDRESS),
+    router: readAddress(process.env.NEXT_PUBLIC_FUJI_ROUTER_ADDRESS),
+  },
+  mainnet: {
+    announcer: readAddress(process.env.NEXT_PUBLIC_MAINNET_ANNOUNCER_ADDRESS),
+    router: readAddress(process.env.NEXT_PUBLIC_MAINNET_ROUTER_ADDRESS),
+  },
 };
+
+/** Block from which to begin scanning announcements, per network. */
+export const SCAN_START_BLOCK: Record<NetworkKey, bigint> = {
+  fuji: BigInt(process.env.NEXT_PUBLIC_FUJI_SCAN_START_BLOCK ?? "0"),
+  mainnet: BigInt(process.env.NEXT_PUBLIC_MAINNET_SCAN_START_BLOCK ?? "0"),
+};
+
+export function contractsFor(network: NetworkKey) {
+  return CONTRACTS[network];
+}
+
+export function isPaymentsConfigured(network: NetworkKey): boolean {
+  return CONTRACTS[network].announcer !== null;
+}

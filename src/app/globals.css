@@ -1,0 +1,262 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   StealthPay — Neo-Brutalist Design System
+   Single source of truth for colour, type, border, shadow and motion tokens.
+   ========================================================================== */
+
+@theme {
+  /* ---------- Colour ---------- */
+  --color-paper: #f5f2e9; /* main application canvas */
+  --color-paper-2: #ece5d4; /* alternating section band */
+  --color-paper-3: #e1d9c3; /* deepest paper tone */
+  --color-ink: #111111; /* text, borders, shadows */
+  --color-lime: #c6f36b; /* primary accent / CTA / success */
+  --color-lime-deep: #a8db44;
+  --color-blue: #5265ff; /* secondary highlight / info */
+  --color-blue-deep: #3b4ce0;
+  --color-coral: #ff836b; /* warning / emphasis */
+  --color-coral-deep: #ec6349;
+  --color-grey: #777777; /* secondary information */
+  --color-grey-soft: #a9a399;
+
+  /* ---------- Type ---------- */
+  --font-display: var(--font-space-grotesk), "Space Grotesk", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), "Geist Mono", ui-monospace,
+    SFMono-Regular, monospace;
+
+  /* ---------- Hard offset shadows (zero blur) ----------
+     Hierarchy: xs/sm for dense UI, base for cards,
+     md/lg/xl reserved for CTAs, hero and selected states. */
+  --shadow-brutal-xs: 2px 2px 0 0 var(--color-ink);
+  --shadow-brutal-sm: 3px 3px 0 0 var(--color-ink);
+  --shadow-brutal: 5px 5px 0 0 var(--color-ink);
+  --shadow-brutal-md: 7px 7px 0 0 var(--color-ink);
+  --shadow-brutal-lg: 10px 10px 0 0 var(--color-ink);
+  --shadow-brutal-xl: 14px 14px 0 0 var(--color-ink);
+  --shadow-brutal-none: 0 0 0 0 var(--color-ink);
+  --shadow-lime: 5px 5px 0 0 var(--color-lime-deep);
+  --shadow-blue: 5px 5px 0 0 var(--color-blue);
+  --shadow-coral: 5px 5px 0 0 var(--color-coral-deep);
+
+  /* ---------- Radius: sharp by default ---------- */
+  --radius-brutal: 2px;
+
+  /* ---------- Motion ---------- */
+  --animate-feed-in: feed-in 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-rise-in: rise-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-blink: blink 1.5s steps(2, start) infinite;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-marquee: marquee 32s linear infinite;
+  --animate-scanline: scanline 2.4s ease-in-out infinite;
+  --animate-overlay-in: overlay-in 0.18s ease-out;
+  --animate-dialog-in: dialog-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ---------- Keyframes ---------- */
+@keyframes feed-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: -180% 0;
+  }
+  to {
+    background-position: 180% 0;
+  }
+}
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@keyframes scanline {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(calc(100% - 3px));
+  }
+}
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* ---------- Base ---------- */
+@layer base {
+  html {
+    /* The brutalist warm-paper palette is the product identity.
+       Pinning the scheme prevents UA dark-mode colour inversion. */
+    color-scheme: light;
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 0.95;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background-color: var(--color-lime);
+    color: var(--color-ink);
+  }
+
+  /* Visible, high-contrast focus for keyboard users across the whole app. */
+  :focus-visible {
+    outline: 3px solid var(--color-blue);
+    outline-offset: 2px;
+  }
+
+  /* Brutalist scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink) var(--color-paper-2);
+  }
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-paper-2);
+    border-left: 2px solid var(--color-ink);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-ink);
+    border: 2px solid var(--color-paper-2);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* ---------- Utilities ---------- */
+
+/* Faint dot grid — used behind hero and feature bands. */
+@utility dot-grid {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-ink) 13%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 18px 18px;
+}
+
+/* Diagonal hatch — decorative fill for empty/structural blocks. */
+@utility hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--color-ink) 0 2px,
+    transparent 2px 9px
+  );
+}
+
+/* Shared transform for pressable brutalist surfaces. Pair with
+   `hover:shadow-*` / `active:shadow-*` so each component keeps its own
+   place in the shadow hierarchy. */
+@utility brutal-press {
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease;
+  &:hover {
+    transform: translate(-2px, -2px);
+  }
+  &:active {
+    transform: translate(2px, 2px);
+  }
+}
+
+/* Loading placeholder band. */
+@utility shimmer-band {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-paper-2) 0%,
+    var(--color-paper-3) 45%,
+    var(--color-paper-2) 90%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}

@@ -1,0 +1,102 @@
+export type Hex = `0x${string}`;
+
+export type NetworkKey = "fuji" | "mainnet";
+
+export interface NetworkConfig {
+  key: NetworkKey;
+  chainId: number;
+  name: string;
+  shortName: string;
+  rpcUrl: string;
+  explorerUrl: string;
+  explorerName: string;
+  currencySymbol: string;
+  testnet: boolean;
+}
+
+export interface AssetInfo {
+  symbol: string;
+  name: string;
+  decimals: number;
+  /** True for the chain's native gas currency (AVAX). */
+  native: boolean;
+  /** Only present for ERC-20 assets. */
+  contract?: Hex;
+  /** ERC-20 support is planned, not yet built — see TECH_STACK.md. */
+  planned?: boolean;
+}
+
+export type TxDirection = "incoming" | "outgoing";
+export type TxStatus = "confirmed" | "pending" | "failed";
+
+export interface StealthTransaction {
+  id: string;
+  direction: TxDirection;
+  status: TxStatus;
+  assetSymbol: string;
+  /** Decimal string, kept as text to avoid float rounding on balances. */
+  amount: string;
+  /** The one-time address funds were sent to. */
+  stealthAddress: Hex;
+  /** Sender for incoming payments, destination for outgoing ones. */
+  counterparty: Hex;
+  counterpartyLabel?: string;
+  txHash: Hex;
+  blockNumber: number;
+  /** ISO 8601 timestamp. */
+  timestamp: string;
+  confirmations: number;
+  /** ERC-5564 announcement data, present on detected incoming payments. */
+  ephemeralPubKey?: Hex;
+  viewTag?: string;
+  schemeId?: number;
+  assetContract?: Hex;
+  note?: string;
+}
+
+export type ScannerStage =
+  | "announcement"
+  | "ephemeral"
+  | "view-tag"
+  | "derive"
+  | "match"
+  | "verify";
+
+export type ScannerOutcome = "info" | "skipped" | "match";
+
+export interface ScannerEvent {
+  id: string;
+  stage: ScannerStage;
+  outcome: ScannerOutcome;
+  message: string;
+  detail: string;
+  blockNumber: number;
+  /** ISO 8601 timestamp. */
+  timestamp: string;
+}
+
+export interface ScannerState {
+  running: boolean;
+  lastScannedBlock: number;
+  chainHeadBlock: number;
+  announcementsProcessed: number;
+  viewTagMatches: number;
+  paymentsDetected: number;
+  lastScanAt: string | null;
+}
+
+/**
+ * Public half of a receiver's stealth identity. Private viewing and spending
+ * keys are never represented in UI-facing types — see PROJECT_FLOW.md §21.
+ */
+export interface StealthIdentity {
+  label: string;
+  viewingPublicKey: Hex;
+  spendingPublicKey: Hex;
+  /** ERC-5564 style meta-address URI: st:avax:0x<spendingPubKey><viewingPubKey> */
+  metaAddress: string;
+  schemeId: number;
+  createdAt: string;
+}
+
+export type KeyCustodyState = "held-locally" | "not-generated";

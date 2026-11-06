@@ -1,0 +1,486 @@
+"use client";
+
+import * as React from "react";
+import {
+  ArrowRight,
+  CircleCheck,
+  Info,
+  KeyRound,
+  RefreshCw,
+  Send,
+  Sparkles,
+  TriangleAlert,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { Badge } from "@/components/ui/badge";
+import { SectionLabel } from "@/components/ui/section-label";
+import { MonoBlock, DataList, DataRow } from "@/components/ui/mono";
+import { NotBroadcastNotice } from "@/components/ui/demo-tag";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/toast";
+import { ASSETS, NETWORKS } from "@/config/networks";
+import { useActiveNetwork } from "@/providers/wallet-provider";
+import { useStealthIdentity } from "@/providers/stealth-identity-provider";
+import { estimateUsd, formatAmount } from "@/lib/format";
+import {
+  generateOneTimeStealthAddress,
+  parseStealthMetaAddress,
+  toSafeErrorMessage,
+  type OneTimeStealthAddress,
+  type SupportedChainId,
+} from "@/lib/stealth";
+
+export function SendForm() {
+  const [metaAddress, setMetaAddress] = React.useState("");
+  const [asset, setAsset] = React.useState("AVAX");
+  const [amount, setAmount] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [touched, setTouched] = React.useState({ meta: false, amount: false });
+  /**
+   * A derivation is bound to the meta-address it came from. Rather than
+   * clearing it from an effect when the input changes, the binding is stored
+   * alongside the result and staleness is derived during render.
+   */
+  const [derivation, setDerivation] = React.useState<{
+    forMetaAddress: string;
+    result: OneTimeStealthAddress | null;
+    error: string | null;
+  } | null>(null);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [prepared, setPrepared] = React.useState(false);
+
+  const networkKey = useActiveNetwork();
+  const network = NETWORKS[networkKey];
+  const chainId = network.chainId as SupportedChainId;
+  const { publicIdentity } = useStealthIdentity();
+  const { toast } = useToast();
+
+  const selectedAsset = ASSETS.find((a) => a.symbol === asset);
+  const assetPlanned = Boolean(selectedAsset?.planned);
+
+  /* ---- Real meta-address validation ---- */
+  const metaError = React.useMemo(() => {
+    if (!metaAddress) return "Enter the recipient's stealth meta-address.";
+    try {
+      parseStealthMetaAddress(metaAddress);
+      return null;
+    } catch (error) {
+      return toSafeErrorMessage(error);
+    }
+  }, [metaAddress]);
+
+  const amountError = React.useMemo(() => {
+    if (!amount) return "Enter an amount.";
+    const n = Number(amount);
+    if (!Number.isFinite(n)) return "Enter a valid number.";
+    if (n <= 0) return "Amount must be greater than zero.";
+    return null;
+  }, [amount]);
+
+  const canDerive = !metaError && !amountError && !assetPlanned;
+
+  // Only honour a derivation that belongs to the meta-address currently typed.
+  const active =
+    derivation?.forMetaAddress === metaAddress ? derivation : null;
+  const derived = active?.result ?? null;
+  const deriveError = active?.error ?? null;
+
+  function derive() {
+    try {
+      // Generates a fresh ephemeral key pair for this payment. The ephemeral
+      // private key is never returned here and never leaves the engine.
+      const result = generateOneTimeStealthAddress({ metaAddress, chainId });
+      setDerivation({ forMetaAddress: metaAddress, result, error: null });
+      toast({
+        tone: "success",
+        title: "One-time address derived",
+        description: "Fresh ephemeral key generated for this payment.",
+      });
+    } catch (error) {
+      setDerivation({
+        forMetaAddress: metaAddress,
+        result: null,
+        error: toSafeErrorMessage(error),
+      });
+    }
+  }
+
+  function reset() {
+    setMetaAddress("");
+    setAsset("AVAX");
+    setAmount("");
+    setNote("");
+    setTouched({ meta: false, amount: false });
+    setDerivation(null);
+    setPrepared(false);
+  }
+
+  function handleConfirm() {
+    setConfirmOpen(false);
+    setPrepared(true);
+    toast({
+      tone: "info",
+      title: "Nothing was broadcast",
+      description: "The address is real; no transaction was sent.",
+    });
+  }
+
+  if (prepared && derived) {
+    return (
+      <div className="border-ink shadow-brutal-md border-[3px] bg-white p-5 sm:p-7">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="border-ink bg-lime grid size-10 place-items-center border-2">
+            <CircleCheck className="size-5" aria-hidden="true" />
+          </span>
+          <div>
+            <SectionLabel className="text-grey">Payment prepared</SectionLabel>
+            <p className="font-display mt-1 text-lg font-bold">
+              Address derived — ready for a future broadcast
+            </p>
+          </div>
+        </div>
+
+        <NotBroadcastNotice className="mt-5">
+          <strong className="font-display">Not broadcast.</strong> The stealth
+          address and ephemeral key below are genuine ERC-5564 scheme 1 output,
+          but no transaction was signed or submitted to Avalanche{" "}
+          {network.shortName}. Sending requires the payment router contract,
+          which is a later milestone.
+        </NotBroadcastNotice>
+
+        <DataList className="mt-5">
+          <DataRow label="Would have sent" mono={false}>
+            <span className="font-display font-bold">
+              {formatAmount(amount)} {asset}
+            </span>
+          </DataRow>
+          <DataRow label="To stealth address">
+            <span className="break-all">{derived.stealthAddress}</span>
+          </DataRow>
+          <DataRow label="Ephemeral public key">
+            <span className="break-all">{derived.ephemeralPublicKey}</span>
+          </DataRow>
+          <DataRow label="View tag" mono>
+            {derived.viewTag}
+          </DataRow>
+          <DataRow label="Network" mono={false}>
+            {network.name} · chain {network.chainId}
+          </DataRow>
+          {note ? (
+            <DataRow label="Note" mono={false}>
+              {note}
+            </DataRow>
+          ) : null}
+        </DataList>
+
+        <Button variant="primary" size="lg" className="mt-6" onClick={reset}>
+          <RefreshCw className="size-4" aria-hidden="true" />
+          Start another
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1.25fr_1fr] lg:items-start">
+      {/* ---- Recipient details ---- */}
+      <div className="border-ink shadow-brutal border-2 bg-white p-5 sm:p-6">
+        <SectionLabel className="text-grey">Recipient details</SectionLabel>
+
+        <div className="mt-5 space-y-4">
+          <Field
+            label="Recipient stealth meta-address"
+            htmlFor="send-meta"
+            required
+            error={touched.meta ? metaError : null}
+            hint="The public (B, A) pair the recipient published. Never a wallet address."
+          >
+            <Textarea
+              id="send-meta"
+              rows={3}
+              spellCheck={false}
+              placeholder="st:avax:0x…"
+              value={metaAddress}
+              onChange={(e) => setMetaAddress(e.target.value.trim())}
+              onBlur={() => setTouched((t) => ({ ...t, meta: true }))}
+              aria-invalid={touched.meta && metaError ? true : undefined}
+            />
+          </Field>
+
+          {publicIdentity ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setMetaAddress(publicIdentity.stealthMetaAddress);
+                setTouched((t) => ({ ...t, meta: true }));
+              }}
+            >
+              <Sparkles className="size-3.5" aria-hidden="true" />
+              Use my own meta-address (self-test)
+            </Button>
+          ) : (
+            <p className="text-grey text-xs leading-relaxed">
+              Tip: create an identity on the Receive page to paste your own
+              meta-address here and watch the full round trip.
+            </p>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Asset" htmlFor="send-asset" required>
+              <Select
+                id="send-asset"
+                value={asset}
+                onChange={(e) => setAsset(e.target.value)}
+              >
+                {ASSETS.map((a) => (
+                  <option key={a.symbol} value={a.symbol}>
+                    {a.symbol}
+                    {a.planned ? " — planned" : ""}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+
+            <Field
+              label="Amount"
+              htmlFor="send-amount"
+              required
+              error={touched.amount ? amountError : null}
+            >
+              <Input
+                id="send-amount"
+                inputMode="decimal"
+                placeholder="10.0"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                onBlur={() => setTouched((t) => ({ ...t, amount: true }))}
+                aria-invalid={touched.amount && amountError ? true : undefined}
+              />
+            </Field>
+          </div>
+
+          <Field
+            label="Note (optional)"
+            htmlFor="send-note"
+            hint="Held in this form only. Never written on-chain."
+          >
+            <Input
+              id="send-note"
+              maxLength={120}
+              placeholder="Retainer payment"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        {assetPlanned ? (
+          <p className="border-ink bg-coral/25 mt-5 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
+            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <span>
+              <strong className="font-display">
+                {asset} is not supported yet.
+              </strong>{" "}
+              ERC-20 payments require safe token transfer handling plus a gas
+              solution for token-only stealth accounts. Native AVAX is the MVP
+              scope.
+            </span>
+          </p>
+        ) : null}
+
+        <Button
+          variant="primary"
+          size="lg"
+          className="mt-5 w-full"
+          disabled={!canDerive}
+          onClick={derive}
+        >
+          <KeyRound className="size-4" aria-hidden="true" />
+          {derived ? "Re-derive with a new ephemeral key" : "Derive one-time address"}
+        </Button>
+
+        {deriveError ? (
+          <p role="alert" className="text-coral-deep mt-3 text-sm font-bold">
+            {deriveError}
+          </p>
+        ) : null}
+      </div>
+
+      {/* ---- Preview ---- */}
+      <div className="space-y-4">
+        <div className="border-ink shadow-brutal border-2 bg-white p-5">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <SectionLabel className="text-grey">Payment preview</SectionLabel>
+            {derived ? (
+              <Badge tone="lime" size="sm">
+                Real ERC-5564 output
+              </Badge>
+            ) : null}
+          </div>
+
+          {derived ? (
+            <>
+              <DataList className="mt-4">
+                <DataRow label="Asset" mono={false}>
+                  <span className="font-display font-bold">{asset}</span>
+                </DataRow>
+                <DataRow label="Amount" mono={false}>
+                  <span className="font-display font-bold">
+                    {formatAmount(amount)} {asset}
+                  </span>
+                  {asset === "AVAX" ? (
+                    <span className="text-grey mt-0.5 block font-sans text-xs">
+                      ≈ {estimateUsd(amount)} (placeholder rate)
+                    </span>
+                  ) : null}
+                </DataRow>
+              </DataList>
+
+              <div className="mt-4 space-y-3">
+                <div>
+                  <p className="font-display text-[0.65rem] font-bold tracking-[0.16em] uppercase">
+                    Derived one-time address
+                  </p>
+                  <MonoBlock className="mt-1.5 text-[0.65rem]">
+                    {derived.stealthAddress}
+                  </MonoBlock>
+                </div>
+                <div>
+                  <p className="font-display text-[0.65rem] font-bold tracking-[0.16em] uppercase">
+                    Ephemeral public key (R)
+                  </p>
+                  <MonoBlock className="mt-1.5 text-[0.65rem]">
+                    {derived.ephemeralPublicKey}
+                  </MonoBlock>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="font-display text-[0.65rem] font-bold tracking-[0.16em] uppercase">
+                      View tag
+                    </p>
+                    <MonoBlock className="mt-1.5">{derived.viewTag}</MonoBlock>
+                  </div>
+                  <div>
+                    <p className="font-display text-[0.65rem] font-bold tracking-[0.16em] uppercase">
+                      Scheme ID
+                    </p>
+                    <MonoBlock className="mt-1.5">{derived.schemeId}</MonoBlock>
+                  </div>
+                </div>
+                <div>
+                  <p className="font-display text-[0.65rem] font-bold tracking-[0.16em] uppercase">
+                    Est. network fee
+                  </p>
+                  <MonoBlock className="mt-1.5">— not estimated</MonoBlock>
+                </div>
+              </div>
+
+              <p className="border-ink bg-paper-2 mt-4 flex items-start gap-2 border-2 p-3 text-[0.7rem] leading-relaxed">
+                <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  These are genuine values from the ERC-5564 scheme 1
+                  derivation. The ephemeral <em>private</em> key was used once
+                  and discarded — it is never shown, stored or published. Fees
+                  are not estimated because no transaction is constructed yet.
+                </span>
+              </p>
+
+              <Button
+                variant="primary"
+                size="lg"
+                className="mt-5 w-full"
+                onClick={() => setConfirmOpen(true)}
+              >
+                <Send className="size-4" aria-hidden="true" />
+                Review &amp; Send
+              </Button>
+            </>
+          ) : (
+            <div className="border-ink mt-4 border-2 border-dashed p-6 text-center">
+              <ArrowRight
+                className="text-grey mx-auto size-6"
+                aria-hidden="true"
+              />
+              <p className="font-display mt-3 text-sm font-bold">
+                Preview appears here
+              </p>
+              <p className="text-grey mt-1.5 text-xs leading-relaxed">
+                Enter a valid meta-address and amount, then derive the one-time
+                address.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="border-ink bg-ink text-paper border-2 p-4">
+          <SectionLabel className="text-lime">Why this is safe</SectionLabel>
+          <p className="text-paper/75 mt-2.5 text-xs leading-relaxed">
+            A sender only ever holds public key material. The ephemeral private
+            key is generated locally, used once, and never published — only its
+            public half travels on-chain in the announcement.
+          </p>
+        </div>
+      </div>
+
+      {/* ---- Confirmation ---- */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm payment details</DialogTitle>
+            <DialogDescription>
+              Review before continuing. This step does not broadcast a
+              transaction.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DataList>
+            <DataRow label="Recipient">
+              <span className="break-all">{metaAddress}</span>
+            </DataRow>
+            <DataRow label="Destination">
+              <span className="break-all">{derived?.stealthAddress}</span>
+            </DataRow>
+            <DataRow label="Asset" mono={false}>
+              {asset}
+            </DataRow>
+            <DataRow label="Amount" mono={false}>
+              <span className="font-display font-bold">
+                {formatAmount(amount)} {asset}
+              </span>
+            </DataRow>
+            <DataRow label="Network" mono={false}>
+              {network.name} · chain {network.chainId}
+            </DataRow>
+            <DataRow label="Network fee" mono={false}>
+              Not estimated
+            </DataRow>
+          </DataList>
+
+          <NotBroadcastNotice className="mt-5">
+            Continuing will <strong>not</strong> sign or send anything. No funds
+            move and no transaction hash is produced.
+          </NotBroadcastNotice>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={handleConfirm}>
+              <Send className="size-4" aria-hidden="true" />
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

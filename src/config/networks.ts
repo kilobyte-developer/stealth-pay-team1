@@ -15,6 +15,7 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
     rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
     explorerUrl: "https://testnet.snowtrace.io",
     explorerName: "Snowtrace Testnet",
+    explorerApiUrl: "https://api-testnet.snowtrace.io/api",
     currencySymbol: "AVAX",
     testnet: true,
   },
@@ -26,6 +27,7 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
     rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
     explorerUrl: "https://snowtrace.io",
     explorerName: "Snowtrace",
+    explorerApiUrl: "https://api.snowtrace.io/api",
     currencySymbol: "AVAX",
     testnet: false,
   },
@@ -45,18 +47,6 @@ export function toHexChainId(chainId: number): `0x${string}` {
 }
 
 /**
- * Assets surfaced in the UI. Native AVAX is the MVP scope; ERC-20 entries are
- * marked `planned` so the interface never implies they already work.
- */
-export const ASSETS: AssetInfo[] = [
-  { symbol: "AVAX", name: "Avalanche", decimals: 18, native: true },
-  { symbol: "USDC", name: "USD Coin (ERC-20)", decimals: 6, native: false, planned: true },
-  { symbol: "WAVAX", name: "Wrapped AVAX (ERC-20)", decimals: 18, native: false, planned: true },
-];
-
-export const NATIVE_ASSET = ASSETS[0];
-
-/**
  * Deployed contract addresses, supplied per network at build time.
  *
  * Reading these from the environment means the app activates on-chain features
@@ -72,17 +62,43 @@ function readAddress(value: string | undefined): Address | null {
 
 export const CONTRACTS: Record<
   NetworkKey,
-  { announcer: Address | null; router: Address | null }
+  { announcer: Address | null; router: Address | null; testToken: Address | null }
 > = {
   fuji: {
     announcer: readAddress(process.env.NEXT_PUBLIC_FUJI_ANNOUNCER_ADDRESS),
     router: readAddress(process.env.NEXT_PUBLIC_FUJI_ROUTER_ADDRESS),
+    testToken: readAddress(process.env.NEXT_PUBLIC_FUJI_TEST_TOKEN_ADDRESS),
   },
   mainnet: {
     announcer: readAddress(process.env.NEXT_PUBLIC_MAINNET_ANNOUNCER_ADDRESS),
     router: readAddress(process.env.NEXT_PUBLIC_MAINNET_ROUTER_ADDRESS),
+    testToken: readAddress(process.env.NEXT_PUBLIC_MAINNET_TEST_TOKEN_ADDRESS),
   },
 };
+
+/**
+ * Assets surfaced in the UI for a given network.
+ *
+ * Native AVAX is always present. The ERC-20 test token only appears once a
+ * real contract address is configured for that network — there is no
+ * `planned`/placeholder entry implying support that is not actually wired up.
+ */
+export function assetsFor(network: NetworkKey): AssetInfo[] {
+  const assets: AssetInfo[] = [
+    { symbol: "AVAX", name: "Avalanche", decimals: 18, native: true },
+  ];
+  const testToken = CONTRACTS[network].testToken;
+  if (testToken) {
+    assets.push({
+      symbol: "stUSD",
+      name: "StealthPay Test USD (ERC-20)",
+      decimals: 6,
+      native: false,
+      contract: testToken,
+    });
+  }
+  return assets;
+}
 
 /** Block from which to begin scanning announcements, per network. */
 export const SCAN_START_BLOCK: Record<NetworkKey, bigint> = {

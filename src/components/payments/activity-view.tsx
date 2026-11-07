@@ -5,40 +5,50 @@ import { Filter, RefreshCw, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
-import { PaymentsTable } from "@/components/payments/payments-table";
+import { ActivityTable } from "@/components/payments/activity-table";
+import {
+  activityRowFromLocalEntry,
+  activityRowFromPayment,
+  toPaymentRow,
+  type ActivityRow,
+} from "@/lib/payments/view-model";
 import { useStealthPayments } from "@/hooks/use-stealth-payments";
+import { useLocalActivity } from "@/hooks/use-local-activity";
+import { useActiveNetwork } from "@/providers/wallet-provider";
 import { formatBlock } from "@/lib/format";
 
+type DirectionFilter = "all" | "incoming" | "sent" | "forwarded";
 type AssetFilter = "all" | "native" | "erc20";
-type SpendFilter = "all" | "spendable" | "needs-gas";
 type SortOrder = "newest" | "oldest";
 
 export function ActivityView() {
+  const network = useActiveNetwork();
   const state = useStealthPayments();
+  const local = useLocalActivity(network);
 
   const [query, setQuery] = React.useState("");
+  const [direction, setDirection] = React.useState<DirectionFilter>("all");
   const [asset, setAsset] = React.useState<AssetFilter>("all");
-  const [spend, setSpend] = React.useState<SpendFilter>("all");
   const [sort, setSort] = React.useState<SortOrder>("newest");
+
+  const allRows = React.useMemo<ActivityRow[]>(() => {
+    const incoming = state.payments.map(toPaymentRow).map(activityRowFromPayment);
+    const sent = local.entries.map(activityRowFromLocalEntry);
+    return [...incoming, ...sent];
+  }, [state.payments, local.entries]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    const rows = state.payments.filter((p) => {
-      if (asset === "native" && p.assetKind !== "native") return false;
-      if (asset === "erc20" && p.assetKind !== "erc20") return false;
-      if (spend === "spendable" && p.assetKind !== "native") return false;
-      if (spend === "needs-gas" && p.assetKind === "native") return false;
+    const rows = allRows.filter((row) => {
+      if (direction !== "all" && row.direction !== direction) return false;
+      // ERC-20 vs native: a native asset's label is always "AVAX"; anything
+      // else is a token, for incoming and local rows alike.
+      if (asset === "native" && row.assetLabel !== "AVAX") return false;
+      if (asset === "erc20" && row.assetLabel === "AVAX") return false;
 
       if (q) {
-        const haystack = [
-          p.stealthAddress,
-          p.transactionHash,
-          p.announcer,
-          p.tokenSymbol ?? "",
-          p.token ?? "",
-          String(p.blockNumber),
-        ]
+        const haystack = [row.from ?? "", row.to, row.transactionHash, row.assetLabel]
           .join(" ")
           .toLowerCase();
         if (!haystack.includes(q)) return false;
@@ -47,22 +57,29 @@ export function ActivityView() {
     });
 
     return [...rows].sort((a, b) => {
-      const delta = Number(b.blockNumber - a.blockNumber);
-      return sort === "newest" ? delta : -delta;
+      const ab = a.blockNumber ?? 0n;
+      const bb = b.blockNumber ?? 0n;
+      const delta = ab > bb ? 1 : ab < bb ? -1 : 0;
+      return sort === "newest" ? -delta : delta;
     });
-  }, [state.payments, query, asset, spend, sort]);
+  }, [allRows, query, direction, asset, sort]);
 
   const dirty =
-    query !== "" || asset !== "all" || spend !== "all" || sort !== "newest";
+    query !== "" || direction !== "all" || asset !== "all" || sort !== "newest";
 
   function clearAll() {
     setQuery("");
+    setDirection("all");
     setAsset("all");
-    setSpend("all");
     setSort("newest");
   }
 
-  const showFilters = state.status === "ready" && state.payments.length > 0;
+  function handleForwarded() {
+    state.rescan();
+    local.refresh();
+  }
+
+  const showFilters = allRows.length > 0;
 
   return (
     <>
@@ -75,7 +92,14 @@ export function ActivityView() {
                 Search &amp; filter
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={state.rescan}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                state.rescan();
+                local.refresh();
+              }}
+            >
               <RefreshCw className="size-3.5" aria-hidden="true" />
               Rescan
             </Button>
@@ -92,7 +116,7 @@ export function ActivityView() {
                 <Input
                   id="activity-search"
                   className="pl-10"
-                  placeholder="Stealth address, transaction hash, token, block…"
+                  placeholder="Address, transaction hash, asset…"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -100,6 +124,20 @@ export function ActivityView() {
             </div>
 
             <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="filter-direction">Type</Label>
+                <Select
+                  id="filter-direction"
+                  value={direction}
+                  onChange={(e) => setDirection(e.target.value as DirectionFilter)}
+                >
+                  <option value="all">All activity</option>
+                  <option value="incoming">Received</option>
+                  <option value="sent">Sent</option>
+                  <option value="forwarded">Forwarded</option>
+                </Select>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="filter-asset">Asset</Label>
                 <Select
@@ -110,19 +148,6 @@ export function ActivityView() {
                   <option value="all">All assets</option>
                   <option value="native">Native AVAX</option>
                   <option value="erc20">Tokens</option>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="filter-spend">Spendable</Label>
-                <Select
-                  id="filter-spend"
-                  value={spend}
-                  onChange={(e) => setSpend(e.target.value as SpendFilter)}
-                >
-                  <option value="all">Any</option>
-                  <option value="spendable">Spendable now</option>
-                  <option value="needs-gas">Needs gas</option>
                 </Select>
               </div>
 
@@ -143,7 +168,7 @@ export function ActivityView() {
           <div className="border-ink/15 mt-4 flex flex-wrap items-center justify-between gap-3 border-t-2 pt-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="white" size="sm">
-                {filtered.length} of {state.payments.length}
+                {filtered.length} of {allRows.length}
               </Badge>
               {state.lastScannedBlock !== null ? (
                 <span className="text-grey font-mono text-[0.7rem]">
@@ -162,13 +187,15 @@ export function ActivityView() {
       ) : null}
 
       <div className={showFilters ? "mt-6" : ""}>
-        <PaymentsTable
-          payments={filtered}
+        <ActivityTable
+          network={network}
+          rows={filtered}
           status={state.status}
           reason={state.reason}
           error={state.error}
           progress={state.progress}
           rescan={state.rescan}
+          onForwarded={handleForwarded}
         />
       </div>
     </>

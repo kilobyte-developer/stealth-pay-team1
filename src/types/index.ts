@@ -12,6 +12,12 @@ export interface NetworkConfig {
   explorerName: string;
   currencySymbol: string;
   testnet: boolean;
+  /**
+   * Snowtrace's Etherscan-compatible REST API, used by the announcement
+   * scanner to fetch historical logs from an indexer instead of paginating
+   * `eth_getLogs` against the raw node — see `src/lib/scanner/explorer-api.ts`.
+   */
+  explorerApiUrl: string;
 }
 
 export interface AssetInfo {
@@ -20,10 +26,8 @@ export interface AssetInfo {
   decimals: number;
   /** True for the chain's native gas currency (AVAX). */
   native: boolean;
-  /** Only present for ERC-20 assets. */
+  /** Only present for ERC-20 assets, and only once a real contract is configured. */
   contract?: Hex;
-  /** ERC-20 support is planned, not yet built — see TECH_STACK.md. */
-  planned?: boolean;
 }
 
 export type TxDirection = "incoming" | "outgoing";

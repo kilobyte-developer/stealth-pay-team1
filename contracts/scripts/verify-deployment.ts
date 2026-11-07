@@ -3,6 +3,7 @@ import {
   CANONICAL_ANNOUNCEMENT_TOPIC0,
   CANONICAL_ANNOUNCE_SELECTOR,
   assertFuji,
+  envOverride,
   logHeading,
   readDeployment,
 } from "./lib";
@@ -20,8 +21,8 @@ async function main() {
   const chainId = await assertFuji();
   const record = readDeployment(network.name);
 
-  const announcer = process.env.FUJI_ANNOUNCER_ADDRESS ?? record.announcer;
-  const router = process.env.FUJI_PAYMENT_ROUTER_ADDRESS ?? record.router;
+  const announcer = envOverride(process.env.FUJI_ANNOUNCER_ADDRESS) ?? record.announcer;
+  const router = envOverride(process.env.FUJI_PAYMENT_ROUTER_ADDRESS) ?? record.router;
 
   logHeading(`Verifying deployment on ${network.name} (chain ${chainId})`);
 

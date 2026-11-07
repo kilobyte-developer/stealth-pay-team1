@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowDownLeft, ExternalLink, TriangleAlert } from "lucide-react";
+import * as React from "react";
+import { ArrowDownLeft, ArrowUpRight, ExternalLink, TriangleAlert } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,9 +10,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { DataList, DataRow } from "@/components/ui/mono";
 import { CopyButton } from "@/components/ui/copy-button";
 import { SectionLabel } from "@/components/ui/section-label";
+import { ForwardPaymentDialog } from "@/components/payments/forward-payment-dialog";
 import { explorerAddressUrl, explorerTxUrl, formatBlock } from "@/lib/format";
 import { useActiveNetwork } from "@/providers/wallet-provider";
 import type { PaymentRow } from "@/lib/payments/view-model";
@@ -20,12 +23,16 @@ export function PaymentDetailDialog({
   payment,
   open,
   onOpenChange,
+  onForwarded,
 }: {
   payment: PaymentRow | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Called after a successful forward, so the caller can refresh balances. */
+  onForwarded?: () => void;
 }) {
   const network = useActiveNetwork();
+  const [forwardOpen, setForwardOpen] = React.useState(false);
   if (!payment) return null;
 
   return (
@@ -144,6 +151,16 @@ export function PaymentDetailDialog({
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2">
+          {payment.spendable ? (
+            <Button
+              variant="dark"
+              size="sm"
+              onClick={() => setForwardOpen(true)}
+            >
+              <ArrowUpRight className="size-3.5" aria-hidden="true" />
+              Forward funds
+            </Button>
+          ) : null}
           <a
             href={explorerTxUrl(network, payment.transactionHash)}
             target="_blank"
@@ -164,6 +181,16 @@ export function PaymentDetailDialog({
           </a>
         </div>
       </DialogContent>
+
+      <ForwardPaymentDialog
+        payment={payment}
+        open={forwardOpen}
+        onOpenChange={setForwardOpen}
+        onForwarded={() => {
+          onForwarded?.();
+          onOpenChange(false);
+        }}
+      />
     </Dialog>
   );
 }

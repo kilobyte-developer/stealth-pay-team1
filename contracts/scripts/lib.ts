@@ -19,6 +19,7 @@ export interface DeploymentRecord {
   announcer: string | null;
   announcerSource: "canonical-reused" | "deployed-reference" | null;
   router: string | null;
+  testToken: string | null;
   deployer: string | null;
   deployedAt: string | null;
   notes?: string;
@@ -39,6 +40,7 @@ export function readDeployment(networkName: string): DeploymentRecord {
       announcer: null,
       announcerSource: null,
       router: null,
+      testToken: null,
       deployer: null,
       deployedAt: null,
     };
@@ -103,6 +105,17 @@ export async function requireFundedDeployer(): Promise<{
   }
 
   return { address: deployer.address, balance };
+}
+
+/**
+ * Reads an env-var override, treating a blank/whitespace-only value as
+ * absent. `.env` files commonly have `KEY=` placeholders for optional
+ * overrides; a plain `??` against `process.env.KEY` would treat that empty
+ * string as "set" and never fall through to the real default.
+ */
+export function envOverride(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
 
 export function logHeading(text: string): void {

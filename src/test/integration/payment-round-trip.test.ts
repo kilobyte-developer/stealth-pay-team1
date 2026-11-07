@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  createWalletClient,
+  http,
   parseEventLogs,
   parseEther,
   slice,
   type Address,
   type Hex,
 } from "viem";
-import { privateKeyToAddress } from "viem/accounts";
+import { generatePrivateKey, privateKeyToAccount, privateKeyToAddress } from "viem/accounts";
 import {
   DEFAULT_CHAIN_ID,
   SCHEME_ID_SECP256K1,
@@ -17,6 +19,7 @@ import {
 } from "@/lib/stealth";
 import { createVault, deleteVault, exportBackup, importBackup, resetVaultDbConnection, unlockVault } from "@/lib/vault";
 import {
+  RPC_URL,
   deploy,
   loadArtifact,
   localChain,
@@ -169,6 +172,83 @@ describe.runIf(process.env.SKIP_CHAIN_INTEGRATION !== "1")(
       expect(
         await node!.publicClient.getBalance({ address: stealthAddress }),
       ).toBe(amount);
+
+      privateKey.destroy();
+      alice.secrets.destroy();
+    });
+
+    it("Alice forwards (sweeps) a received native payment using only the derived one-time key", async () => {
+      // Mirrors `forwardPayment` in src/providers/stealth-identity-provider.tsx
+      // exactly: derive the one-time key, sign locally with it (never via a
+      // "connected wallet", which never holds this key), and sweep the full
+      // balance minus a precisely-known legacy-transaction fee.
+      const alice = generateStealthIdentity(DEFAULT_CHAIN_ID);
+      const payment = generateOneTimeStealthAddress({
+        metaAddress: alice.publicIdentity.stealthMetaAddress,
+        chainId: DEFAULT_CHAIN_ID,
+      });
+
+      const amount = parseEther("0.3");
+      const payHash = await node!.walletClient.writeContract({
+        address: router,
+        abi: routerArtifact.abi,
+        functionName: "payNative",
+        args: [payment.stealthAddress, payment.ephemeralPublicKey, payment.viewTag],
+        value: amount,
+        account: node!.account,
+        chain: localChain,
+      });
+      await announcementsFrom(payHash);
+
+      const { privateKey, stealthAddress } = deriveOneTimeSpendingKey({
+        ephemeralPublicKey: payment.ephemeralPublicKey,
+        viewingPrivateKey: alice.secrets.viewingPrivateKey,
+        spendingPrivateKey: alice.secrets.spendingPrivateKey,
+        expectedStealthAddress: payment.stealthAddress,
+        schemeId: SCHEME_ID_SECP256K1,
+      });
+
+      const forwardingClient = createWalletClient({
+        account: privateKeyToAccount(privateKey.toHex()),
+        chain: localChain,
+        transport: http(RPC_URL),
+      });
+      // An unrelated throwaway destination — not Alice, not Bob, not the
+      // stealth address itself.
+      const destination = privateKeyToAccount(generatePrivateKey()).address;
+
+      const balanceBefore = await node!.publicClient.getBalance({
+        address: stealthAddress,
+      });
+      expect(balanceBefore).toBe(amount);
+
+      const gasLimit = 21_000n;
+      const gasPrice =
+        ((await node!.publicClient.getGasPrice()) * 120n) / 100n;
+      const fee = gasPrice * gasLimit;
+      const sweepValue = balanceBefore - fee;
+
+      const forwardHash = await forwardingClient.sendTransaction({
+        to: destination,
+        value: sweepValue,
+        gas: gasLimit,
+        gasPrice,
+        chain: localChain,
+      });
+      const forwardReceipt = await node!.publicClient.waitForTransactionReceipt({
+        hash: forwardHash,
+      });
+      expect(forwardReceipt.status).toBe("success");
+
+      // The full swept amount actually arrived at the unrelated destination.
+      expect(
+        await node!.publicClient.getBalance({ address: destination }),
+      ).toBe(sweepValue);
+      // A plain transfer costs exactly 21,000 gas, so the fee was exact and
+      // the stealth address is left at precisely zero — nothing stranded.
+      expect(
+        await node!.publicClient.getBalance({ address: stealthAddress }),
+      ).toBe(0n);
 
       privateKey.destroy();
       alice.secrets.destroy();

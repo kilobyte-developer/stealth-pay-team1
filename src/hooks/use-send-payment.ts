@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { parseEther, parseUnits, type Address, type Hex } from "viem";
+import { erc20Abi, parseEther, parseUnits, type Address, type Hex } from "viem";
 import { StealthPaymentRouterAbi } from "@/config/abi";
 import { CONTRACTS, NETWORKS } from "@/config/networks";
 import { getPublicClient } from "@/lib/chain/client";
+import { recordLocalActivity } from "@/lib/activity/local-log";
 import { useActiveNetwork, useWallet } from "@/providers/wallet-provider";
 import type { OneTimeStealthAddress } from "@/lib/stealth";
 
@@ -13,7 +14,13 @@ export type SendBlockedReason =
   | "unsupported-chain"
   | "router-not-configured";
 
-export type SendStage = "idle" | "signing" | "pending" | "confirmed" | "failed";
+export type SendStage =
+  | "idle"
+  | "approving"
+  | "signing"
+  | "pending"
+  | "confirmed"
+  | "failed";
 
 export interface SendPaymentState {
   blocked: SendBlockedReason | null;
@@ -26,6 +33,8 @@ export interface SendPaymentState {
     /** Native AVAX when null; otherwise an ERC-20 contract. */
     token: Address | null;
     tokenDecimals?: number;
+    /** Display symbol, for the local activity log (e.g. "AVAX", "stUSD"). */
+    assetSymbol: string;
     /** Optional native top-up accompanying a token payment, in AVAX. */
     gasTopUpAvax?: string;
   }) => Promise<void>;
@@ -63,7 +72,7 @@ export function useSendPayment(): SendPaymentState {
   }, []);
 
   const send = React.useCallback<SendPaymentState["send"]>(
-    async ({ derived, amount, token, tokenDecimals, gasTopUpAvax }) => {
+    async ({ derived, amount, token, tokenDecimals, assetSymbol, gasTopUpAvax }) => {
       if (blocked !== null || !router) return;
 
       const walletClient = getWalletClient();
@@ -78,6 +87,37 @@ export function useSendPayment(): SendPaymentState {
 
       try {
         const topUp = gasTopUpAvax ? parseEther(gasTopUpAvax) : 0n;
+
+        if (token) {
+          const tokenAmount = parseUnits(amount, tokenDecimals ?? 18);
+          const allowance = await getPublicClient(network).readContract({
+            address: token,
+            abi: erc20Abi,
+            functionName: "allowance",
+            args: [walletClient.account.address, router],
+          });
+
+          if (allowance < tokenAmount) {
+            setStage("approving");
+            const approveHash = await walletClient.writeContract({
+              address: token,
+              abi: erc20Abi,
+              functionName: "approve",
+              args: [router, tokenAmount],
+              account: walletClient.account,
+              chain: walletClient.chain,
+            });
+            const approveReceipt = await getPublicClient(
+              network,
+            ).waitForTransactionReceipt({ hash: approveHash });
+            if (approveReceipt.status !== "success") {
+              setStage("failed");
+              setError("The token approval reverted on-chain.");
+              return;
+            }
+            setStage("signing");
+          }
+        }
 
         const hash = token
           ? await walletClient.writeContract({
@@ -119,6 +159,21 @@ export function useSendPayment(): SendPaymentState {
         // A reverted transaction still produces a receipt, so status matters.
         if (receipt.status === "success") {
           setStage("confirmed");
+          recordLocalActivity({
+            id: hash,
+            kind: "send",
+            network,
+            from: walletClient.account.address,
+            to: derived.stealthAddress,
+            assetSymbol,
+            assetDecimals: token ? (tokenDecimals ?? 18) : 18,
+            isNative: !token,
+            tokenContract: token,
+            amount,
+            txHash: hash,
+            blockNumber: receipt.blockNumber.toString(),
+            timestamp: new Date().toISOString(),
+          });
         } else {
           setStage("failed");
           setError(

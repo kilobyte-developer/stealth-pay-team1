@@ -8,6 +8,7 @@
     "test": "hardhat test",
     "deploy:announcer:fuji": "hardhat run scripts/deploy-announcer.ts --network fuji",
     "deploy:router:fuji": "hardhat run scripts/deploy-router.ts --network fuji",
+    "deploy:test-token:fuji": "hardhat run scripts/deploy-test-token.ts --network fuji",
     "verify:fuji": "hardhat run scripts/verify-deployment.ts --network fuji",
     "smoke:fuji": "hardhat run scripts/fuji-smoke-payment.ts --network fuji",
     "check:announcer": "hardhat run scripts/check-canonical-announcer.ts --network fuji",

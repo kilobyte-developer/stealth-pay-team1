@@ -10,7 +10,7 @@ export default function ActivityPage() {
       <PageHeader
         eyebrow="Activity"
         title="Payment history."
-        description="Every announcement matched to your viewing key, with the balance verified against the chain."
+        description="Payments received, sent, and forwarded — detected announcements verified on-chain, plus sends and forwards this browser made."
       />
 
       <ActivityView />

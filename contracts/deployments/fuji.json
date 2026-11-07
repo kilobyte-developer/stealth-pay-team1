@@ -1,0 +1,11 @@
+{
+  "network": "fuji",
+  "chainId": "43113",
+  "announcer": "0x576c07eba9A19e2c31da9359193b7f3F70a21342",
+  "announcerSource": "deployed-reference",
+  "router": "0xB14D5665f5BF628e8D297E252b0f09C4B42009cB",
+  "testToken": "0xB114A2B17F1E7b028249cCFec2D98D25a3Bbe9C0",
+  "deployer": "0x180A8E81f50ed8Ca5C39D8F7316605bEbB72B283",
+  "deployedAt": "2026-11-06T21:00:56.842Z",
+  "notes": "Canonical address 0x55649E...45564 has no code on Fuji and its deterministic init code/salt are not published by the ERC, so the reference implementation was deployed here instead. Event signature is byte-identical to canonical."
+}

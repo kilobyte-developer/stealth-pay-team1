@@ -8,7 +8,8 @@ import { SectionLabel } from "@/components/ui/section-label";
 import { MonoBlock } from "@/components/ui/mono";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Badge } from "@/components/ui/badge";
-import { ASSETS } from "@/config/networks";
+import { assetsFor } from "@/config/networks";
+import { useActiveNetwork } from "@/providers/wallet-provider";
 
 /**
  * Builds a shareable payment-request string. This is a convenience annotation
@@ -16,6 +17,8 @@ import { ASSETS } from "@/config/networks";
  * change any of it.
  */
 export function PaymentRequestForm({ metaAddress }: { metaAddress: string }) {
+  const networkKey = useActiveNetwork();
+  const assets = React.useMemo(() => assetsFor(networkKey), [networkKey]);
   const [asset, setAsset] = React.useState("AVAX");
   const [amount, setAmount] = React.useState("");
   const [description, setDescription] = React.useState("");
@@ -48,7 +51,7 @@ export function PaymentRequestForm({ metaAddress }: { metaAddress: string }) {
     return `${metaAddress}?${params.toString()}`;
   }, [metaAddress, asset, amount, description, amountError]);
 
-  const selectedAsset = ASSETS.find((a) => a.symbol === asset);
+  const selectedAsset = assets.find((a) => a.symbol === asset);
 
   return (
     <div className="border-ink shadow-brutal border-2 bg-white p-5 sm:p-6">
@@ -74,10 +77,9 @@ export function PaymentRequestForm({ metaAddress }: { metaAddress: string }) {
             value={asset}
             onChange={(e) => setAsset(e.target.value)}
           >
-            {ASSETS.map((a) => (
+            {assets.map((a) => (
               <option key={a.symbol} value={a.symbol}>
                 {a.symbol}
-                {a.planned ? " — planned" : ""}
               </option>
             ))}
           </Select>
@@ -116,12 +118,12 @@ export function PaymentRequestForm({ metaAddress }: { metaAddress: string }) {
         />
       </Field>
 
-      {selectedAsset?.planned ? (
-        <p className="border-ink bg-coral/25 mt-4 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
+      {selectedAsset && !selectedAsset.native ? (
+        <p className="border-ink bg-paper-2 mt-4 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
           <span>
-            ERC-20 support is planned but not built. A token payment would also
-            need native AVAX at the stealth address to cover gas when spending.
+            {selectedAsset.symbol} is an ERC-20 token. Ask the sender to
+            include a native gas top-up so the payment can be moved later.
           </span>
         </p>
       ) : null}

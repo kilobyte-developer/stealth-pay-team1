@@ -273,6 +273,7 @@ export function PaymentsTable({
         payment={selected}
         open={open}
         onOpenChange={setOpen}
+        onForwarded={rescan}
       />
     </>
   );

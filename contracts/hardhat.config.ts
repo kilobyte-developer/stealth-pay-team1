@@ -51,6 +51,36 @@ const config: HardhatUserConfig = {
     artifacts: "./artifacts",
   },
   mocha: { timeout: 120_000 },
+  /**
+   * Source-code verification on Snowtrace (Fuji).
+   *
+   * No real API key is required: confirmed against Avalanche's own official
+   * Hardhat verification guide (https://build.avax.network/docs/primary-network/verify-contract/hardhat),
+   * which configures `etherscan: {}` with no key. `hardhat-verify@2.1.3`
+   * (the version installed here) still requires the `apiKey` field to be
+   * present for an unlisted chain, so a placeholder string is supplied below —
+   * it is not a secret and is never checked by the explorer.
+   *
+   * If `https://api-testnet.snowtrace.io/api` ever stops responding, Routescan
+   * (which now powers Snowtrace) also serves an Etherscan-compatible endpoint
+   * at `https://api.routescan.io/v2/network/testnet/evm/43113/etherscan/api` —
+   * documented here as a fallback, not yet needed.
+   */
+  etherscan: {
+    apiKey: {
+      fuji: "snowtrace-no-key-required",
+    },
+    customChains: [
+      {
+        network: "fuji",
+        chainId: 43113,
+        urls: {
+          apiURL: "https://api-testnet.snowtrace.io/api",
+          browserURL: "https://testnet.snowtrace.io",
+        },
+      },
+    ],
+  },
 };
 
 export default config;

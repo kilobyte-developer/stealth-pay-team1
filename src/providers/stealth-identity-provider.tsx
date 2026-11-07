@@ -8,11 +8,16 @@ import {
   deriveOneTimeSpendingKey,
   generateStealthIdentity,
   toSafeErrorMessage,
+  type OneTimeSpendingKey,
   type StealthCheckResult,
   type StealthIdentityBundle,
   type StealthIdentityPublic,
   type SupportedChainId,
 } from "@/lib/stealth";
+import { createWalletClient, formatEther, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { getChain, getPublicClient } from "@/lib/chain/client";
+import { recordLocalActivity } from "@/lib/activity/local-log";
 import {
   DEFAULT_AUTO_LOCK_MS,
   changeVaultPassword,
@@ -40,6 +45,12 @@ export interface AnnouncementInput {
 export interface SpendKeyProof {
   ok: boolean;
   stealthAddress?: Address;
+  error?: string;
+}
+
+export interface ForwardPaymentResult {
+  ok: boolean;
+  txHash?: Hex;
   error?: string;
 }
 
@@ -84,6 +95,14 @@ interface StealthIdentityContextValue {
 
   checkAnnouncement: (input: AnnouncementInput) => StealthCheckResult | null;
   proveSpendControl: (input: AnnouncementInput) => SpendKeyProof;
+  /**
+   * Sweeps the full native balance of a detected one-time stealth address to
+   * `to`. Signs locally with the derived one-time key — never via the
+   * connected wallet, since that wallet does not and cannot hold this key.
+   */
+  forwardPayment: (
+    input: AnnouncementInput & { to: Address },
+  ) => Promise<ForwardPaymentResult>;
 }
 
 const StealthIdentityContext =
@@ -348,6 +367,97 @@ export function StealthIdentityProvider({
     [],
   );
 
+  const forwardPayment = React.useCallback(
+    async (
+      input: AnnouncementInput & { to: Address },
+    ): Promise<ForwardPaymentResult> => {
+      const bundle = bundleRef.current;
+      if (!bundle) return { ok: false, error: "No identity unlocked." };
+
+      let derivedKey: OneTimeSpendingKey | null = null;
+      try {
+        derivedKey = deriveOneTimeSpendingKey({
+          ephemeralPublicKey: input.ephemeralPublicKey,
+          viewingPrivateKey: bundle.secrets.viewingPrivateKey,
+          spendingPrivateKey: bundle.secrets.spendingPrivateKey,
+          expectedStealthAddress: input.stealthAddress,
+          schemeId: input.schemeId ?? SCHEME_ID_SECP256K1,
+        });
+
+        // Signs with the one-time key directly, over the public RPC — this
+        // address was never imported into the connected wallet, and never
+        // should be.
+        const account = privateKeyToAccount(derivedKey.privateKey.toHex());
+        const chain = getChain(activeNetworkKey);
+        const publicClient = getPublicClient(activeNetworkKey);
+        const walletClient = createWalletClient({
+          account,
+          chain,
+          transport: http(NETWORKS[activeNetworkKey].rpcUrl),
+        });
+
+        const balance = await publicClient.getBalance({
+          address: account.address,
+        });
+        const gasLimit = 21_000n;
+        // A legacy (type-0) transaction with explicit gas fields is used
+        // deliberately: it lets the exact fee be known up front, so the full
+        // balance minus that fee can be swept without leaving dust or risking
+        // an underfunded EIP-1559 fee estimate.
+        const gasPrice = (await publicClient.getGasPrice() * 120n) / 100n;
+        const fee = gasPrice * gasLimit;
+
+        if (balance <= fee) {
+          return {
+            ok: false,
+            error: "Balance is too low to cover the network fee to forward it.",
+          };
+        }
+
+        const hash = await walletClient.sendTransaction({
+          to: input.to,
+          value: balance - fee,
+          gas: gasLimit,
+          gasPrice,
+          chain,
+        });
+
+        const receipt = await publicClient.waitForTransactionReceipt({
+          hash,
+        });
+        if (receipt.status !== "success") {
+          return {
+            ok: false,
+            error: "The forwarding transaction reverted on-chain.",
+          };
+        }
+
+        recordLocalActivity({
+          id: hash,
+          kind: "forward",
+          network: activeNetworkKey,
+          from: account.address,
+          to: input.to,
+          assetSymbol: "AVAX",
+          assetDecimals: 18,
+          isNative: true,
+          tokenContract: null,
+          amount: formatEther(balance - fee),
+          txHash: hash,
+          blockNumber: receipt.blockNumber.toString(),
+          timestamp: new Date().toISOString(),
+        });
+
+        return { ok: true, txHash: hash };
+      } catch (err) {
+        return { ok: false, error: toSafeErrorMessage(err) };
+      } finally {
+        derivedKey?.privateKey.destroy();
+      }
+    },
+    [activeNetworkKey],
+  );
+
   const value = React.useMemo<StealthIdentityContextValue>(
     () => ({
       publicIdentity,
@@ -371,6 +481,7 @@ export function StealthIdentityProvider({
       clearError: () => setError(null),
       checkAnnouncement,
       proveSpendControl,
+      forwardPayment,
     }),
     [
       publicIdentity,
@@ -391,6 +502,7 @@ export function StealthIdentityProvider({
       refreshVaultStatus,
       checkAnnouncement,
       proveSpendControl,
+      forwardPayment,
     ],
   );
 

@@ -27,7 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { ASSETS, NETWORKS } from "@/config/networks";
+import { assetsFor, NETWORKS } from "@/config/networks";
 import { useActiveNetwork } from "@/providers/wallet-provider";
 import { useStealthIdentity } from "@/providers/stealth-identity-provider";
 import { explorerTxUrl, formatAmount } from "@/lib/format";
@@ -45,6 +45,7 @@ export function SendForm() {
   const [asset, setAsset] = React.useState("AVAX");
   const [amount, setAmount] = React.useState("");
   const [note, setNote] = React.useState("");
+  const [gasTopUpAvax, setGasTopUpAvax] = React.useState("");
   const [touched, setTouched] = React.useState({ meta: false, amount: false });
   /**
    * A derivation is bound to the meta-address it came from. Rather than
@@ -65,8 +66,8 @@ export function SendForm() {
   const { toast } = useToast();
   const sendState = useSendPayment();
 
-  const selectedAsset = ASSETS.find((a) => a.symbol === asset);
-  const assetPlanned = Boolean(selectedAsset?.planned);
+  const assets = React.useMemo(() => assetsFor(networkKey), [networkKey]);
+  const selectedAsset = assets.find((a) => a.symbol === asset);
 
   /* ---- Real meta-address validation ---- */
   const metaError = React.useMemo(() => {
@@ -87,7 +88,15 @@ export function SendForm() {
     return null;
   }, [amount]);
 
-  const canDerive = !metaError && !amountError && !assetPlanned;
+  const gasTopUpError = React.useMemo(() => {
+    if (selectedAsset?.native || !gasTopUpAvax) return null;
+    const n = Number(gasTopUpAvax);
+    if (!Number.isFinite(n)) return "Enter a valid number.";
+    if (n < 0) return "Top-up cannot be negative.";
+    return null;
+  }, [gasTopUpAvax, selectedAsset]);
+
+  const canDerive = !metaError && !amountError && !gasTopUpError;
 
   // Only honour a derivation that belongs to the meta-address currently typed.
   const active =
@@ -120,6 +129,7 @@ export function SendForm() {
     setAsset("AVAX");
     setAmount("");
     setNote("");
+    setGasTopUpAvax("");
     setTouched({ meta: false, amount: false });
     setDerivation(null);
   }
@@ -131,6 +141,9 @@ export function SendForm() {
       amount,
       token: selectedAsset?.contract ?? null,
       tokenDecimals: selectedAsset?.decimals,
+      assetSymbol: asset,
+      gasTopUpAvax:
+        !selectedAsset?.native && gasTopUpAvax ? gasTopUpAvax : undefined,
     });
     setConfirmOpen(false);
   }
@@ -252,10 +265,9 @@ export function SendForm() {
                 value={asset}
                 onChange={(e) => setAsset(e.target.value)}
               >
-                {ASSETS.map((a) => (
+                {assets.map((a) => (
                   <option key={a.symbol} value={a.symbol}>
                     {a.symbol}
-                    {a.planned ? " — planned" : ""}
                   </option>
                 ))}
               </Select>
@@ -279,6 +291,24 @@ export function SendForm() {
             </Field>
           </div>
 
+          {!selectedAsset?.native ? (
+            <Field
+              label="Native gas top-up (optional)"
+              htmlFor="send-gas-topup"
+              error={gasTopUpError}
+              hint={`Sends extra AVAX to the recipient's one-time address so it can pay gas to move the ${asset} later.`}
+            >
+              <Input
+                id="send-gas-topup"
+                inputMode="decimal"
+                placeholder="0.01"
+                value={gasTopUpAvax}
+                onChange={(e) => setGasTopUpAvax(e.target.value)}
+                aria-invalid={gasTopUpError ? true : undefined}
+              />
+            </Field>
+          ) : null}
+
           <Field
             label="Note (optional)"
             htmlFor="send-note"
@@ -294,16 +324,13 @@ export function SendForm() {
           </Field>
         </div>
 
-        {assetPlanned ? (
-          <p className="border-ink bg-coral/25 mt-5 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        {!selectedAsset?.native ? (
+          <p className="border-ink bg-paper-2 mt-5 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
+            <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <span>
-              <strong className="font-display">
-                {asset} is not supported yet.
-              </strong>{" "}
-              ERC-20 payments require safe token transfer handling plus a gas
-              solution for token-only stealth accounts. Native AVAX is the MVP
-              scope.
+              {asset} requires your wallet to approve the router before the
+              transfer. You will see two signature prompts: one approval, then
+              the payment itself.
             </span>
           </p>
         ) : null}
@@ -483,6 +510,11 @@ export function SendForm() {
                 {formatAmount(amount)} {asset}
               </span>
             </DataRow>
+            {!selectedAsset?.native && gasTopUpAvax && !gasTopUpError ? (
+              <DataRow label="Gas top-up" mono={false}>
+                {formatAmount(gasTopUpAvax)} AVAX
+              </DataRow>
+            ) : null}
             <DataRow label="Network" mono={false}>
               {network.name} · chain {network.chainId}
             </DataRow>
@@ -503,19 +535,27 @@ export function SendForm() {
             </Button>
             <Button
               variant="primary"
-              disabled={sendState.stage === "signing" || sendState.stage === "pending"}
+              disabled={
+                sendState.stage === "approving" ||
+                sendState.stage === "signing" ||
+                sendState.stage === "pending"
+              }
               onClick={handleConfirm}
             >
-              {sendState.stage === "signing" || sendState.stage === "pending" ? (
+              {sendState.stage === "approving" ||
+              sendState.stage === "signing" ||
+              sendState.stage === "pending" ? (
                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
               ) : (
                 <Send className="size-4" aria-hidden="true" />
               )}
-              {sendState.stage === "signing"
-                ? "Check your wallet"
-                : sendState.stage === "pending"
-                  ? "Confirming"
-                  : "Confirm & send"}
+              {sendState.stage === "approving"
+                ? "Approve in your wallet"
+                : sendState.stage === "signing"
+                  ? "Check your wallet"
+                  : sendState.stage === "pending"
+                    ? "Confirming"
+                    : "Confirm & send"}
             </Button>
           </DialogFooter>
         </DialogContent>

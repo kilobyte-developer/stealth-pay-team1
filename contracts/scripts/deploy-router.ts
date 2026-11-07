@@ -1,6 +1,7 @@
 import { ethers, network } from "hardhat";
 import {
   assertFuji,
+  envOverride,
   logHeading,
   readDeployment,
   requireFundedDeployer,
@@ -12,7 +13,7 @@ async function main() {
   const { address: deployer, balance } = await requireFundedDeployer();
 
   const record = readDeployment(network.name);
-  const announcer = process.env.FUJI_ANNOUNCER_ADDRESS ?? record.announcer;
+  const announcer = envOverride(process.env.FUJI_ANNOUNCER_ADDRESS) ?? record.announcer;
 
   if (!announcer) {
     throw new Error(

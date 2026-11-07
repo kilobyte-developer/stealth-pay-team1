@@ -89,6 +89,9 @@ export function SettingsView() {
   const [connectOpen, setConnectOpen] = React.useState(false);
   const connected = status === "connected" || status === "switching";
   const announcerConfigured = CONTRACTS[networkKey].announcer !== null;
+  const deployedNetworkNames = (["fuji", "mainnet"] as const)
+    .filter((key) => CONTRACTS[key].announcer && CONTRACTS[key].router)
+    .map((key) => NETWORKS[key].shortName);
 
   return (
     <div className="space-y-6">
@@ -264,7 +267,11 @@ export function SettingsView() {
 
         <Row
           label="Contract configuration"
-          hint="The ERC-5564 announcer and StealthPay payment router have not been deployed yet. No addresses are configured on any network."
+          hint={
+            deployedNetworkNames.length > 0
+              ? `The ERC-5564 announcer and StealthPay payment router are live on ${deployedNetworkNames.join(" and ")}.`
+              : "The ERC-5564 announcer and StealthPay payment router have not been deployed yet. No addresses are configured on any network."
+          }
         >
           {(["fuji", "mainnet"] as const).map((key) => {
             const c = CONTRACTS[key];

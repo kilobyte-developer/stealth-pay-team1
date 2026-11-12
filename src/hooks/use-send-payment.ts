@@ -6,6 +6,7 @@ import { StealthPaymentRouterAbi } from "@/config/abi";
 import { CONTRACTS, NETWORKS } from "@/config/networks";
 import { getPublicClient } from "@/lib/chain/client";
 import { recordLocalActivity } from "@/lib/activity/local-log";
+import { logTransactionForDebug } from "@/lib/supabase/log-transaction-for-debug";
 import { useActiveNetwork, useWallet } from "@/providers/wallet-provider";
 import type { OneTimeStealthAddress } from "@/lib/stealth";
 
@@ -173,6 +174,20 @@ export function useSendPayment(): SendPaymentState {
             txHash: hash,
             blockNumber: receipt.blockNumber.toString(),
             timestamp: new Date().toISOString(),
+          });
+          // Dev-only debug log — see docs/DEBUG_LOG.md. Fire-and-forget,
+          // never affects the send flow above, which has already succeeded.
+          logTransactionForDebug({
+            txHash: hash,
+            kind: "send",
+            network,
+            from: walletClient.account.address,
+            to: derived.stealthAddress,
+            assetSymbol,
+            isNative: !token,
+            tokenContract: token,
+            amount,
+            blockNumber: receipt.blockNumber.toString(),
           });
         } else {
           setStage("failed");

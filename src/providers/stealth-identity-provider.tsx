@@ -18,6 +18,7 @@ import { createWalletClient, formatEther, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getPublicClient } from "@/lib/chain/client";
 import { recordLocalActivity } from "@/lib/activity/local-log";
+import { logTransactionForDebug } from "@/lib/supabase/log-transaction-for-debug";
 import {
   DEFAULT_AUTO_LOCK_MS,
   changeVaultPassword,
@@ -446,6 +447,20 @@ export function StealthIdentityProvider({
           txHash: hash,
           blockNumber: receipt.blockNumber.toString(),
           timestamp: new Date().toISOString(),
+        });
+        // Dev-only debug log — see docs/DEBUG_LOG.md. Fire-and-forget, never
+        // affects the forward above, which has already succeeded.
+        logTransactionForDebug({
+          txHash: hash,
+          kind: "forward",
+          network: activeNetworkKey,
+          from: account.address,
+          to: input.to,
+          assetSymbol: "AVAX",
+          isNative: true,
+          tokenContract: null,
+          amount: formatEther(balance - fee),
+          blockNumber: receipt.blockNumber.toString(),
         });
 
         return { ok: true, txHash: hash };

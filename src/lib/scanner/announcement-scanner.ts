@@ -1,9 +1,16 @@
 import { erc20Abi, type Address, type Hex } from "viem";
 import { getPublicClient } from "@/lib/chain/client";
 import { NETWORKS } from "@/config/networks";
-import { parseAnnouncementMetadata } from "./metadata";
+import {
+  EIP3009_TRANSFER_WITH_AUTHORIZATION_SELECTOR,
+  parseAnnouncementMetadata,
+} from "./metadata";
 import { ANNOUNCEMENT_EVENT } from "./announcement-event";
-import { decodeExplorerLog, fetchAnnouncementsViaExplorerApi } from "./explorer-api";
+import {
+  decodeExplorerLog,
+  fetchAnnouncementsViaExplorerApi,
+  fetchTokenTransfersViaExplorerApi,
+} from "./explorer-api";
 import type { NetworkKey } from "@/types";
 import type { StealthCheckResult } from "@/lib/stealth";
 
@@ -114,6 +121,91 @@ export interface DetectedPayment {
   blockNumber: bigint;
   transactionHash: Hex;
   logIndex: number;
+  /**
+   * x402 payments only: the settlement transaction whose token Transfer into
+   * the stealth address was verified on-chain. The announcement itself is a
+   * separate, later transaction (`transactionHash`). Null for router payments.
+   */
+  x402SettlementTx: Hex | null;
+  /** x402 only: block of the verified settlement transfer. */
+  x402SettlementBlock: bigint | null;
+}
+
+const TRANSFER_EVENT = {
+  type: "event",
+  name: "Transfer",
+  inputs: [
+    { name: "from", type: "address", indexed: true },
+    { name: "to", type: "address", indexed: true },
+    { name: "value", type: "uint256", indexed: false },
+  ],
+} as const;
+
+/** Blocks searched before an x402 announcement for its settlement transfer. */
+const X402_SETTLEMENT_LOOKBACK = 99n;
+
+/**
+ * Finds the verified token Transfer of exactly `amount` into `stealthAddress`
+ * at or shortly before the announcement block. The relayer announces only
+ * after settlement confirms, so the transfer is in a nearby earlier block.
+ * Returns null if not found (the payment is then judged on balance alone).
+ */
+async function findX402Settlement(
+  client: ReturnType<typeof getPublicClient>,
+  { token, stealthAddress, amount, announcementBlock, scanFromBlock, explorerApiUrl, signal }: {
+    token: Address;
+    stealthAddress: Address;
+    amount: bigint;
+    announcementBlock: bigint;
+    /** Lower bound for the full-range RPC fallback. */
+    scanFromBlock: bigint;
+    explorerApiUrl?: string;
+    signal?: AbortSignal;
+  },
+): Promise<{ from: Address; txHash: Hex; blockNumber: bigint } | null> {
+  // 1. Indexer: the address's full transfer history in one call. Needed
+  //    because the announcement can come long after settlement (e.g. a
+  //    retried announcement), beyond any fixed look-back window.
+  if (explorerApiUrl) {
+    try {
+      const transfers = await fetchTokenTransfersViaExplorerApi({
+        apiUrl: explorerApiUrl,
+        token,
+        address: stealthAddress,
+        signal,
+      });
+      const hit = transfers.find(
+        (t) => t.to === stealthAddress && t.value === amount && t.blockNumber <= announcementBlock,
+      );
+      if (hit) return { from: hit.from, txHash: hit.hash, blockNumber: hit.blockNumber };
+    } catch {
+      // Indexer unavailable — fall through to RPC.
+    }
+  }
+
+  // 2. RPC: the usual case (announced right after settlement) fits in one
+  //    window under the public Fuji RPC's 100-block eth_getLogs cap; 3. then
+  //    one full-range query, which RPCs without that cap (local nodes) answer.
+  const windows: [bigint, bigint][] = [
+    [announcementBlock > X402_SETTLEMENT_LOOKBACK ? announcementBlock - X402_SETTLEMENT_LOOKBACK : 0n, announcementBlock],
+    [scanFromBlock, announcementBlock],
+  ];
+  for (const [fromBlock, toBlock] of windows) {
+    try {
+      const logs = await client.getLogs({
+        address: token,
+        event: TRANSFER_EVENT,
+        args: { to: stealthAddress },
+        fromBlock,
+        toBlock,
+      });
+      const hit = logs.find((l) => l.args.value === amount && l.args.from);
+      if (hit) return { from: hit.args.from!, txHash: hit.transactionHash, blockNumber: hit.blockNumber };
+    } catch {
+      // Range rejected or RPC error: try the next strategy.
+    }
+  }
+  return null;
 }
 
 export interface ScanProgress {
@@ -143,6 +235,12 @@ export interface ScanOptions {
   onProgress?: (progress: ScanProgress) => void;
   signal?: AbortSignal;
   chunkSize?: bigint;
+  /**
+   * The configured StealthPaymentRouter. Its announcements are atomic with
+   * the transfer, so a payment it announced stays listed after the funds are
+   * forwarded (balance 0). Omit to keep the balance-only rule.
+   */
+  router?: Address | null;
 }
 
 export interface ScanResult {
@@ -217,7 +315,9 @@ export async function scanAnnouncements(
   } = options;
 
   const client = getPublicClient(network);
-  const headBlock = options.toBlock ?? (await client.getBlockNumber());
+  // cacheTime 0: viem otherwise serves a head up to ~4s stale, so a rescan
+  // right after a payment would stop short of the block that contains it.
+  const headBlock = options.toBlock ?? (await client.getBlockNumber({ cacheTime: 0 }));
 
   const payments: DetectedPayment[] = [];
   let announcementsSeen = 0;
@@ -296,19 +396,48 @@ export async function scanAnnouncements(
       return;
     }
 
-    // Nothing held means nothing was received (or it has already been spent).
-    if (verifiedBalance === 0n) return;
+    // x402 (EIP-3009) payments are announced in a SEPARATE transaction sent
+    // by the announcement relayer after settlement, so that tx's `from` is
+    // the relayer, not the payer. For them, the actual token Transfer into
+    // the stealth address is looked up instead: it proves receipt (even if
+    // the funds were later withdrawn) and names the real payer.
+    const isX402Announcement =
+      parsed.selector?.toLowerCase() === EIP3009_TRANSFER_WITH_AUTHORIZATION_SELECTOR;
+    const x402Settlement =
+      isX402Announcement && parsed.kind === "erc20" && parsed.token && parsed.amount
+        ? await findX402Settlement(client, {
+            token: parsed.token,
+            stealthAddress,
+            amount: parsed.amount,
+            announcementBlock: log.blockNumber,
+            scanFromBlock: fromBlock,
+            explorerApiUrl: NETWORKS[network].explorerApiUrl || undefined,
+            signal,
+          })
+        : null;
+
+    // An empty address is kept ONLY with proof the payment really happened,
+    // so forwarded payments stay in history while spam announcements (which
+    // move no funds) are still dropped:
+    //  - x402: the token Transfer into the stealth address was found above;
+    //  - router: the configured StealthPaymentRouter transfers and announces
+    //    in one transaction (or reverts both), so its announcement is proof.
+    const viaConfiguredRouter =
+      !!options.router && caller.toLowerCase() === options.router.toLowerCase();
+    if (verifiedBalance === 0n && !x402Settlement && !viaConfiguredRouter) return;
 
     // The announcement's `caller` is the router, not the payer — the real
     // payer is only visible as the transaction's own `from`, which needs a
     // separate lookup. Non-fatal if it fails: the payment itself is already
     // confirmed real by the balance check above.
-    let payerAddress: Address | null = null;
-    try {
-      const tx = await client.getTransaction({ hash: log.transactionHash });
-      payerAddress = tx.from;
-    } catch {
-      payerAddress = null;
+    let payerAddress: Address | null = x402Settlement?.from ?? null;
+    if (!isX402Announcement) {
+      try {
+        const tx = await client.getTransaction({ hash: log.transactionHash });
+        payerAddress = tx.from;
+      } catch {
+        payerAddress = null;
+      }
     }
 
     payments.push({
@@ -328,6 +457,8 @@ export async function scanAnnouncements(
       blockNumber: log.blockNumber,
       transactionHash: log.transactionHash,
       logIndex: log.logIndex,
+      x402SettlementTx: x402Settlement?.txHash ?? null,
+      x402SettlementBlock: x402Settlement?.blockNumber ?? null,
     });
   }
 

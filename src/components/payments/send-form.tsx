@@ -32,6 +32,7 @@ import { useActiveNetwork } from "@/providers/wallet-provider";
 import { useStealthIdentity } from "@/providers/stealth-identity-provider";
 import { explorerTxUrl, formatAmount } from "@/lib/format";
 import { describeSendBlock, useSendPayment } from "@/hooks/use-send-payment";
+import { describeX402Block, useX402Payment } from "@/hooks/use-x402-payment";
 import {
   generateOneTimeStealthAddress,
   parseStealthMetaAddress,
@@ -64,10 +65,21 @@ export function SendForm() {
   const chainId = network.chainId as SupportedChainId;
   const { publicIdentity } = useStealthIdentity();
   const { toast } = useToast();
-  const sendState = useSendPayment();
+  const routerState = useSendPayment();
+  const x402State = useX402Payment();
 
   const assets = React.useMemo(() => assetsFor(networkKey), [networkKey]);
   const selectedAsset = assets.find((a) => a.symbol === asset);
+  /** x402 (EIP-3009) assets settle via facilitator, not the router. */
+  const isX402 = selectedAsset?.rail === "x402";
+  const sendState = isX402 ? x402State : routerState;
+  const blockedMessage = isX402
+    ? x402State.blocked && describeX402Block(x402State.blocked)
+    : routerState.blocked && describeSendBlock(routerState.blocked, networkKey);
+  const busy =
+    sendState.stage !== "idle" &&
+    sendState.stage !== "confirmed" &&
+    sendState.stage !== "failed";
 
   /* ---- Real meta-address validation ---- */
   const metaError = React.useMemo(() => {
@@ -89,7 +101,7 @@ export function SendForm() {
   }, [amount]);
 
   const gasTopUpError = React.useMemo(() => {
-    if (selectedAsset?.native || !gasTopUpAvax) return null;
+    if (selectedAsset?.native || selectedAsset?.rail === "x402" || !gasTopUpAvax) return null;
     const n = Number(gasTopUpAvax);
     if (!Number.isFinite(n)) return "Enter a valid number.";
     if (n < 0) return "Top-up cannot be negative.";
@@ -136,7 +148,12 @@ export function SendForm() {
 
   async function handleConfirm() {
     if (!derived) return;
-    await sendState.send({
+    if (isX402) {
+      await x402State.send({ derived, amount });
+      setConfirmOpen(false);
+      return;
+    }
+    await routerState.send({
       derived,
       amount,
       token: selectedAsset?.contract ?? null,
@@ -180,10 +197,49 @@ export function SendForm() {
           </DataRow>
         </DataList>
 
-        <p className="text-grey mt-4 text-xs leading-relaxed">
-          The router transferred the funds and emitted the ERC-5564 announcement
-          in the same transaction, so the recipient can detect it.
-        </p>
+        {isX402 ? (
+          <>
+            <DataList className="mt-2">
+              <DataRow label="Announcement" mono={false}>
+                {x402State.payment?.status === "announced"
+                  ? "Published"
+                  : "Not yet confirmed"}
+              </DataRow>
+              {x402State.payment?.announcementTx ? (
+                <DataRow label="Announcement tx">
+                  <span className="break-all">{x402State.payment.announcementTx}</span>
+                </DataRow>
+              ) : null}
+            </DataList>
+            <p className="text-grey mt-4 text-xs leading-relaxed">
+              Settled through x402 with your EIP-3009 authorization; the
+              transfer was confirmed on-chain before the ERC-5564 announcement
+              was published, so the recipient can detect it.
+            </p>
+            {x402State.payment?.announcementRetryable ? (
+              <p className="border-ink bg-coral/25 mt-4 flex flex-wrap items-center gap-3 border-2 p-3 text-xs leading-relaxed">
+                <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
+                <span className="flex-1">
+                  The payment settled, but its announcement is not confirmed
+                  yet. Retrying is safe and never pays twice.
+                </span>
+                <Button variant="outline" size="sm" onClick={x402State.retryAnnouncement}>
+                  Retry announcement
+                </Button>
+              </p>
+            ) : null}
+            {x402State.error ? (
+              <p role="alert" className="text-coral-deep mt-3 text-xs font-bold">
+                {x402State.error}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-grey mt-4 text-xs leading-relaxed">
+            The router transferred the funds and emitted the ERC-5564 announcement
+            in the same transaction, so the recipient can detect it.
+          </p>
+        )}
 
         <div className="mt-6 flex flex-wrap gap-3">
           {sendState.txHash ? (
@@ -201,7 +257,8 @@ export function SendForm() {
             variant="primary"
             size="md"
             onClick={() => {
-              sendState.reset();
+              routerState.reset();
+              x402State.reset();
               reset();
             }}
           >
@@ -291,7 +348,7 @@ export function SendForm() {
             </Field>
           </div>
 
-          {!selectedAsset?.native ? (
+          {!selectedAsset?.native && !isX402 ? (
             <Field
               label="Native gas top-up (optional)"
               htmlFor="send-gas-topup"
@@ -328,9 +385,9 @@ export function SendForm() {
           <p className="border-ink bg-paper-2 mt-5 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
             <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <span>
-              {asset} requires your wallet to approve the router before the
-              transfer. You will see two signature prompts: one approval, then
-              the payment itself.
+              {isX402
+                ? `${asset} is paid through x402: you sign one EIP-3009 transfer authorization (no gas, no approval). A facilitator settles it to the one-time address, and the announcement is published only after settlement confirms on-chain.`
+                : `${asset} requires your wallet to approve the router before the transfer. You will see two signature prompts: one approval, then the payment itself.`}
             </span>
           </p>
         ) : null}
@@ -427,13 +484,13 @@ export function SendForm() {
                 </span>
               </p>
 
-              {sendState.blocked ? (
+              {blockedMessage ? (
                 <p className="border-ink bg-coral/25 mt-5 flex items-start gap-2 border-2 p-3 text-xs leading-relaxed">
                   <TriangleAlert
                     className="mt-0.5 size-4 shrink-0"
                     aria-hidden="true"
                   />
-                  {describeSendBlock(sendState.blocked, networkKey)}
+                  {blockedMessage}
                 </p>
               ) : null}
 
@@ -510,7 +567,7 @@ export function SendForm() {
                 {formatAmount(amount)} {asset}
               </span>
             </DataRow>
-            {!selectedAsset?.native && gasTopUpAvax && !gasTopUpError ? (
+            {!selectedAsset?.native && !isX402 && gasTopUpAvax && !gasTopUpError ? (
               <DataRow label="Gas top-up" mono={false}>
                 {formatAmount(gasTopUpAvax)} AVAX
               </DataRow>
@@ -519,14 +576,16 @@ export function SendForm() {
               {network.name} · chain {network.chainId}
             </DataRow>
             <DataRow label="Network fee" mono={false}>
-              Shown by your wallet before signing
+              {isX402
+                ? "None for you — the facilitator submits the transfer"
+                : "Shown by your wallet before signing"}
             </DataRow>
           </DataList>
 
           <p className="border-ink bg-paper-2 mt-5 border-2 p-3 text-xs leading-relaxed">
-            Confirming opens your wallet to sign a real transaction on{" "}
-            {network.shortName}. The router transfers the funds and emits the
-            announcement atomically.
+            {isX402
+              ? `Confirming opens your wallet to sign an EIP-3009 authorization for exactly this amount to the one-time address on ${network.shortName}. It expires in 5 minutes and can be used only once.`
+              : `Confirming opens your wallet to sign a real transaction on ${network.shortName}. The router transfers the funds and emits the announcement atomically.`}
           </p>
 
           <DialogFooter>
@@ -535,16 +594,10 @@ export function SendForm() {
             </Button>
             <Button
               variant="primary"
-              disabled={
-                sendState.stage === "approving" ||
-                sendState.stage === "signing" ||
-                sendState.stage === "pending"
-              }
+              disabled={busy}
               onClick={handleConfirm}
             >
-              {sendState.stage === "approving" ||
-              sendState.stage === "signing" ||
-              sendState.stage === "pending" ? (
+              {busy ? (
                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
               ) : (
                 <Send className="size-4" aria-hidden="true" />
@@ -553,9 +606,11 @@ export function SendForm() {
                 ? "Approve in your wallet"
                 : sendState.stage === "signing"
                   ? "Check your wallet"
-                  : sendState.stage === "pending"
+                  : sendState.stage === "pending" || sendState.stage === "requesting"
                     ? "Confirming"
-                    : "Confirm & send"}
+                    : sendState.stage === "settling"
+                      ? "Settling via x402"
+                      : "Confirm & send"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -40,6 +40,17 @@ export interface LocalActivityEntry {
   blockNumber: string;
   /** ISO 8601, when this browser recorded the entry. */
   timestamp: string;
+  /**
+   * x402 rail only. For a send: the backend's verified state of the payment
+   * (only ever recorded once settlement is confirmed on-chain). For a
+   * forward: marks a gasless EIP-3009 withdrawal.
+   */
+  x402?: {
+    status: "settled" | "announced";
+    /** The payment id (= stealth address) for status/announcement retries. */
+    paymentId: Address;
+    announcementTx: Hex | null;
+  };
 }
 
 const STORAGE_PREFIX = "stealthpay:activity";

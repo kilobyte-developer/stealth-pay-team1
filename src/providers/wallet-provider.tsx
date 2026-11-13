@@ -20,14 +20,17 @@ import {
 } from "viem";
 import {
   DEFAULT_NETWORK,
+  IS_LOCAL_DEV_CHAIN,
   NETWORKS,
   networkByChainId,
   toHexChainId,
 } from "@/config/networks";
-import { getChain } from "@/lib/chain/client";
+import { getChain, getPublicClient } from "@/lib/chain/client";
 import type { Hex, NetworkKey } from "@/types";
 
 const LAST_WALLET_KEY = "stealthpay:last-wallet-rdns";
+
+export type WalletRpcStatus = "ok" | "checking" | "mismatch";
 
 export type WalletStatus =
   | "disconnected"
@@ -50,6 +53,13 @@ interface WalletContextValue {
   error: string | null;
   /** True when connected to a chain StealthPay does not support. */
   unsupportedChain: boolean;
+  /**
+   * Local development only (Fuji overridden to a loopback Hardhat node):
+   * whether the wallet's chain 43113 is the app's node or e.g. still public
+   * Fuji. Detected by comparing genesis block hashes, since both report
+   * chainId 43113. Always "ok" outside local dev.
+   */
+  walletRpcStatus: WalletRpcStatus;
   connect: (uuid: string) => Promise<void>;
   disconnect: () => void;
   switchNetwork: (key: NetworkKey) => Promise<void>;
@@ -233,6 +243,42 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   React.useEffect(() => () => detachRef.current?.(), []);
 
+  /* ---- Local dev: is the wallet on the SAME 43113 node as the app? ---- */
+  const [walletGenesis, setWalletGenesis] = React.useState<{ chainId: number; matches: boolean } | null>(null);
+  React.useEffect(() => {
+    const provider = activeProvider.current;
+    if (!IS_LOCAL_DEV_CHAIN || !provider || status !== "connected" || chainId !== NETWORKS.fuji.chainId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [walletBlock, appBlock] = await Promise.all([
+          provider.request<{ hash?: string } | null>({ method: "eth_getBlockByNumber", params: ["0x0", false] }),
+          getPublicClient("fuji").getBlock({ blockNumber: 0n }),
+        ]);
+        if (!cancelled) {
+          setWalletGenesis({
+            chainId,
+            matches: walletBlock?.hash?.toLowerCase() === appBlock.hash?.toLowerCase(),
+          });
+        }
+      } catch {
+        // Cannot tell (e.g. local node down): treat as a mismatch so nothing is sent blindly.
+        if (!cancelled) setWalletGenesis({ chainId, matches: false });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, chainId, address]);
+  const walletRpcStatus: WalletRpcStatus =
+    !IS_LOCAL_DEV_CHAIN || status !== "connected" || chainId !== NETWORKS.fuji.chainId
+      ? "ok"
+      : walletGenesis === null || walletGenesis.chainId !== chainId
+        ? "checking"
+        : walletGenesis.matches
+          ? "ok"
+          : "mismatch";
+
   /* ---- Actions ---- */
   const connect = React.useCallback(
     async (uuid: string) => {
@@ -349,6 +395,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       error,
       unsupportedChain:
         connected && chainId !== null && !networkByChainId(chainId),
+      walletRpcStatus,
       connect,
       disconnect,
       switchNetwork,
@@ -365,6 +412,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     announced.length,
     legacy.length,
     error,
+    walletRpcStatus,
     connect,
     disconnect,
     switchNetwork,

@@ -94,6 +94,8 @@ export function useStealthPayments(): StealthPaymentsState {
           network,
           announcer,
           fromBlock: SCAN_START_BLOCK[network],
+          // Lets forwarded (now empty) router payments stay in history.
+          router: CONTRACTS[network].router,
           match: (input) => checkAnnouncement(input),
           onProgress: (progress) => {
             if (controller.signal.aborted) return;

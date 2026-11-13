@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# x402 payment state store (public data, but local runtime state)
+/.stealthpay/
+
 # vercel
 .vercel
 

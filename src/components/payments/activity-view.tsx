@@ -9,6 +9,7 @@ import { ActivityTable } from "@/components/payments/activity-table";
 import {
   activityRowFromLocalEntry,
   activityRowFromPayment,
+  linkActivityRows,
   toPaymentRow,
   type ActivityRow,
 } from "@/lib/payments/view-model";
@@ -34,7 +35,8 @@ export function ActivityView() {
   const allRows = React.useMemo<ActivityRow[]>(() => {
     const incoming = state.payments.map(toPaymentRow).map(activityRowFromPayment);
     const sent = local.entries.map(activityRowFromLocalEntry);
-    return [...incoming, ...sent];
+    // Forwards stay separate events, linked to the incoming payment they spent.
+    return linkActivityRows([...incoming, ...sent]);
   }, [state.payments, local.entries]);
 
   const filtered = React.useMemo(() => {

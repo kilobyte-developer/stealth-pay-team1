@@ -1,5 +1,22 @@
 import { getAddress, isAddress, type Address } from "viem";
 import type { AssetInfo, NetworkConfig, NetworkKey } from "@/types";
+import { FUJI_USDC } from "@/lib/x402/config";
+
+function isLoopbackUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(value.trim()).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when "Fuji" is overridden to a LOCAL node (a Hardhat chain using
+ * chainId 43113) for development. Only then do the local-only safety checks
+ * and labels apply; with no override the app behaves exactly as before.
+ */
+export const IS_LOCAL_DEV_CHAIN = isLoopbackUrl(process.env.NEXT_PUBLIC_FUJI_RPC_URL);
 
 /**
  * Avalanche network configuration.
@@ -10,12 +27,21 @@ export const NETWORKS: Record<NetworkKey, NetworkConfig> = {
   fuji: {
     key: "fuji",
     chainId: 43113,
-    name: "Avalanche Fuji C-Chain",
-    shortName: "Fuji Testnet",
-    rpcUrl: "https://api.avax-test.network/ext/bc/C/rpc",
+    name: IS_LOCAL_DEV_CHAIN ? "Local Hardhat (chainId 43113)" : "Avalanche Fuji C-Chain",
+    shortName: IS_LOCAL_DEV_CHAIN ? "Local Hardhat (43113)" : "Fuji Testnet",
+    // Optional local-development override (e.g. a Hardhat node running with
+    // chainId 43113, see docs/X402_INTEGRATION.md). Unset → public Fuji RPC.
+    rpcUrl:
+      process.env.NEXT_PUBLIC_FUJI_RPC_URL?.trim() ||
+      "https://api.avax-test.network/ext/bc/C/rpc",
     explorerUrl: "https://testnet.snowtrace.io",
     explorerName: "Snowtrace Testnet",
-    explorerApiUrl: "https://api-testnet.snowtrace.io/api",
+    // Set to an empty string for a local chain: the Snowtrace API only knows
+    // real Fuji, so the scanner must use the RPC path instead.
+    explorerApiUrl: IS_LOCAL_DEV_CHAIN
+      ? "" // a local chain is never indexed by Snowtrace
+      : (process.env.NEXT_PUBLIC_FUJI_EXPLORER_API_URL ??
+        "https://api-testnet.snowtrace.io/api"),
     currencySymbol: "AVAX",
     testnet: true,
   },
@@ -97,7 +123,24 @@ export function assetsFor(network: NetworkKey): AssetInfo[] {
       contract: testToken,
     });
   }
+  // x402 (EIP-3009) payments. Fuji only, and only once the deployment opts in
+  // (the backend additionally needs its facilitator URL and relayer key).
+  if (network === "fuji" && isX402Enabled()) {
+    assets.push({
+      symbol: FUJI_USDC.symbol,
+      name: FUJI_USDC.name,
+      decimals: FUJI_USDC.decimals,
+      native: false,
+      contract: FUJI_USDC.address,
+      rail: "x402",
+    });
+  }
   return assets;
+}
+
+/** Public opt-in for the x402 payment path (NEXT_PUBLIC_FUJI_X402_ENABLED=true). */
+export function isX402Enabled(): boolean {
+  return process.env.NEXT_PUBLIC_FUJI_X402_ENABLED === "true";
 }
 
 /** Block from which to begin scanning announcements, per network. */

@@ -234,6 +234,9 @@ export function ActivityTable({
                       <meta.Icon className="size-3" aria-hidden="true" />
                       {meta.label}
                     </Badge>
+                    {row.statusLabel ? (
+                      <p className="text-grey mt-1 text-[0.65rem]">{row.statusLabel}</p>
+                    ) : null}
                   </td>
                   <td className="p-3">
                     <AddressCell value={row.from} />
@@ -251,6 +254,9 @@ export function ActivityTable({
                     {row.blockNumber !== null
                       ? formatBlock(Number(row.blockNumber))
                       : "—"}
+                    <span className="block text-[0.65rem]" title={row.transactionHash}>
+                      tx {truncateMiddle(row.transactionHash, 6, 4)}
+                    </span>
                   </td>
                   <td className="p-3 text-right">
                     {row.incoming ? (
@@ -302,8 +308,15 @@ export function ActivityTable({
                 ) : null}
               </div>
 
+              {row.statusLabel ? (
+                <p className="text-grey mt-2 text-[0.65rem]">{row.statusLabel}</p>
+              ) : null}
+
               <p className="font-display mt-3 text-xl font-bold">
                 {row.amount} <span className="text-sm">{row.assetLabel}</span>
+              </p>
+              <p className="text-grey mt-1 font-mono text-[0.65rem] break-all">
+                tx {row.transactionHash}
               </p>
 
               <div className="mt-3 space-y-1.5">

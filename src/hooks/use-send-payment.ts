@@ -13,7 +13,10 @@ import type { OneTimeStealthAddress } from "@/lib/stealth";
 export type SendBlockedReason =
   | "wallet-not-connected"
   | "unsupported-chain"
-  | "router-not-configured";
+  | "router-not-configured"
+  // Local development only (see walletRpcStatus); never set on real Fuji.
+  | "wallet-rpc-checking"
+  | "wallet-rpc-mismatch";
 
 export type SendStage =
   | "idle"
@@ -51,7 +54,7 @@ export interface SendPaymentState {
  */
 export function useSendPayment(): SendPaymentState {
   const network = useActiveNetwork();
-  const { address, getWalletClient, unsupportedChain } = useWallet();
+  const { address, getWalletClient, unsupportedChain, walletRpcStatus } = useWallet();
   const router = CONTRACTS[network].router;
 
   const [stage, setStage] = React.useState<SendStage>("idle");
@@ -64,7 +67,11 @@ export function useSendPayment(): SendPaymentState {
       ? "unsupported-chain"
       : !router
         ? "router-not-configured"
-        : null;
+        : walletRpcStatus === "checking"
+          ? "wallet-rpc-checking"
+          : walletRpcStatus === "mismatch"
+            ? "wallet-rpc-mismatch"
+            : null;
 
   const reset = React.useCallback(() => {
     setStage("idle");
@@ -224,5 +231,9 @@ export function describeSendBlock(
       return `Switch your wallet to ${NETWORKS[network].shortName} to send.`;
     case "router-not-configured":
       return "No payment router is configured for this network yet.";
+    case "wallet-rpc-checking":
+      return "Checking that your wallet is connected to the local Hardhat node…";
+    case "wallet-rpc-mismatch":
+      return "Your wallet reports chain 43113 but is NOT on this app's local Hardhat node (it is probably on public Avalanche Fuji). In MetaMask, select the network whose RPC is http://127.0.0.1:8545, then reload.";
   }
 }

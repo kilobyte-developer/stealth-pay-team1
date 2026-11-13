@@ -206,6 +206,10 @@ export function PaymentsTable({
                       <ArrowDownLeft className="size-3" aria-hidden="true" />
                       Yes
                     </Badge>
+                  ) : row.forwarded ? (
+                    <Badge tone="ink" size="sm">
+                      Forwarded
+                    </Badge>
                   ) : (
                     <Badge tone="coral" size="sm">
                       <Fuel className="size-3" aria-hidden="true" />
@@ -241,7 +245,11 @@ export function PaymentsTable({
                 <ArrowDownLeft className="size-3" aria-hidden="true" />
                 Received
               </Badge>
-              {row.spendable ? null : (
+              {row.spendable ? null : row.forwarded ? (
+                <Badge tone="ink" size="sm">
+                  Forwarded
+                </Badge>
+              ) : (
                 <Badge tone="coral" size="sm">
                   <Fuel className="size-3" aria-hidden="true" />
                   Needs gas

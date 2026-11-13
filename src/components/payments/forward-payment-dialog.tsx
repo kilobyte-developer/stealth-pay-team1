@@ -25,12 +25,12 @@ import { useStealthIdentity } from "@/providers/stealth-identity-provider";
 import type { PaymentRow } from "@/lib/payments/view-model";
 
 /**
- * Sweeps a detected stealth payment's full native balance to a destination
- * address, signing locally with the one-time key derived for that address.
+ * Sweeps a detected stealth payment's full balance to a destination address,
+ * signing locally with the one-time key derived for that address.
  *
- * Only reachable for native payments (`payment.spendable`): an ERC-20
- * balance cannot pay its own gas, so there is nothing this dialog could do
- * for one yet.
+ * Reachable when `payment.spendable`: native AVAX, or the x402 EIP-3009 asset
+ * (withdrawn gaslessly through the facilitator). Other ERC-20 balances cannot
+ * pay their own gas, so they are not offered here.
  */
 export function ForwardPaymentDialog({
   payment,
@@ -44,7 +44,7 @@ export function ForwardPaymentDialog({
   onForwarded?: () => void;
 }) {
   const network = useActiveNetwork();
-  const { forwardPayment } = useStealthIdentity();
+  const { forwardPayment, withdrawX402Token } = useStealthIdentity();
 
   const [to, setTo] = React.useState("");
   const [touched, setTouched] = React.useState(false);
@@ -80,7 +80,11 @@ export function ForwardPaymentDialog({
     setStage("forwarding");
     setError(null);
 
-    const result = await forwardPayment({
+    // Native AVAX: swept by a tx the one-time key signs and pays gas for.
+    // x402 USDC: an EIP-3009 authorization the one-time key signs, submitted
+    // gaslessly by the facilitator.
+    const forward = payment.isNative ? forwardPayment : withdrawX402Token;
+    const result = await forward({
       stealthAddress: payment.stealthAddress as Address,
       ephemeralPublicKey: payment.ephemeralPublicKey as `0x${string}`,
       viewTag: payment.viewTag as `0x${string}`,
@@ -137,7 +141,11 @@ export function ForwardPaymentDialog({
               htmlFor="forward-to"
               required
               error={touched ? toError : null}
-              hint={`The full ${payment.assetLabel} balance at ${payment.stealthAddress.slice(0, 10)}… will be swept here, minus the network fee.`}
+              hint={
+                payment.isNative
+                  ? `The full ${payment.assetLabel} balance at ${payment.stealthAddress.slice(0, 10)}… will be swept here, minus the network fee.`
+                  : `The full ${payment.assetLabel} balance at ${payment.stealthAddress.slice(0, 10)}… will be sent here via x402 (EIP-3009). No gas is needed at the one-time address.`
+              }
             >
               <Input
                 id="forward-to"

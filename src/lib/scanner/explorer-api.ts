@@ -1,4 +1,4 @@
-import { decodeEventLog, toEventSelector, type Address, type Hex } from "viem";
+import { decodeEventLog, getAddress, toEventSelector, type Address, type Hex } from "viem";
 import { ANNOUNCEMENT_EVENT } from "./announcement-event";
 // Type-only: erased at compile time, so this cannot create a circular
 // *runtime* import even though announcement-scanner.ts imports values from
@@ -74,6 +74,58 @@ export async function fetchAnnouncementsViaExplorerApi({
     throw new Error("Explorer API returned an unexpected response shape.");
   }
   return body.result;
+}
+
+export interface ExplorerTokenTransfer {
+  hash: Hex;
+  blockNumber: bigint;
+  from: Address;
+  to: Address;
+  value: bigint;
+}
+
+/**
+ * Every transfer of `token` into or out of `address`, from the explorer's
+ * indexer (`account/tokentx`) — one request with no block-range limit, unlike
+ * the public RPC's 100-block eth_getLogs cap. Throws on any failure so the
+ * caller can fall back to RPC.
+ */
+export async function fetchTokenTransfersViaExplorerApi({
+  apiUrl,
+  token,
+  address,
+  signal,
+}: {
+  apiUrl: string;
+  token: Address;
+  address: Address;
+  signal?: AbortSignal;
+}): Promise<ExplorerTokenTransfer[]> {
+  const url = new URL(apiUrl);
+  url.searchParams.set("module", "account");
+  url.searchParams.set("action", "tokentx");
+  url.searchParams.set("address", address);
+  url.searchParams.set("contractaddress", token);
+  url.searchParams.set("sort", "asc");
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`Explorer API responded ${response.status}`);
+  const body = (await response.json()) as {
+    status: string;
+    message: string;
+    result: { hash: string; blockNumber: string; from: string; to: string; value: string }[] | string;
+  };
+  if (body.status === "0") {
+    if (/no (records|transactions) found/i.test(body.message)) return [];
+    throw new Error(`Explorer API error: ${body.message}`);
+  }
+  if (!Array.isArray(body.result)) throw new Error("Explorer API returned an unexpected response shape.");
+  return body.result.map((t) => ({
+    hash: t.hash as Hex,
+    blockNumber: BigInt(t.blockNumber),
+    from: getAddress(t.from),
+    to: getAddress(t.to),
+    value: BigInt(t.value),
+  }));
 }
 
 /**

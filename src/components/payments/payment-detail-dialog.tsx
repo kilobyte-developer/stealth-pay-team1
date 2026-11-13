@@ -140,7 +140,14 @@ export function PaymentDetailDialog({
           </DataList>
         </div>
 
-        {!payment.spendable ? (
+        {payment.forwarded ? (
+          <p className="border-ink bg-paper-2 mt-5 border-2 p-3 text-xs leading-relaxed">
+            {payment.statusLabel}. This address is now empty; the payment stays
+            in your history because its receipt is proven on-chain.
+          </p>
+        ) : null}
+
+        {!payment.spendable && !payment.forwarded ? (
           <div className="border-ink bg-coral/25 mt-5 flex items-start gap-2.5 border-2 p-3">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <p className="text-xs leading-relaxed">

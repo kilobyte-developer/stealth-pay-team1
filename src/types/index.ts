@@ -28,6 +28,12 @@ export interface AssetInfo {
   native: boolean;
   /** Only present for ERC-20 assets, and only once a real contract is configured. */
   contract?: Hex;
+  /**
+   * How a payment in this asset is made. Absent = StealthPaymentRouter.
+   * "x402" = x402 `exact` scheme with an EIP-3009 authorization, settled by a
+   * facilitator and announced by the backend after settlement confirms.
+   */
+  rail?: "x402";
 }
 
 export type TxDirection = "incoming" | "outgoing";

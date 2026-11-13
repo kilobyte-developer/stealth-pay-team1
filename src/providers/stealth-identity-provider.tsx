@@ -14,7 +14,9 @@ import {
   type StealthIdentityPublic,
   type SupportedChainId,
 } from "@/lib/stealth";
-import { createWalletClient, formatEther, http } from "viem";
+import { createWalletClient, erc20Abi, formatEther, formatUnits, http } from "viem";
+import { FUJI_USDC, X402_FUJI_NETWORK } from "@/lib/x402/config";
+import { withdrawStealthTokenViaX402 } from "@/lib/x402/client";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getPublicClient } from "@/lib/chain/client";
 import { recordLocalActivity } from "@/lib/activity/local-log";
@@ -102,6 +104,14 @@ interface StealthIdentityContextValue {
    * connected wallet, since that wallet does not and cannot hold this key.
    */
   forwardPayment: (
+    input: AnnouncementInput & { to: Address },
+  ) => Promise<ForwardPaymentResult>;
+  /**
+   * Withdraws the full x402 USDC balance of a detected stealth address to
+   * `to`, gaslessly: the derived one-time key signs an EIP-3009 authorization
+   * locally and the facilitator submits it.
+   */
+  withdrawX402Token: (
     input: AnnouncementInput & { to: Address },
   ) => Promise<ForwardPaymentResult>;
 }
@@ -473,6 +483,78 @@ export function StealthIdentityProvider({
     [activeNetworkKey],
   );
 
+  const withdrawX402Token = React.useCallback(
+    async (
+      input: AnnouncementInput & { to: Address },
+    ): Promise<ForwardPaymentResult> => {
+      const bundle = bundleRef.current;
+      if (!bundle) return { ok: false, error: "No identity unlocked." };
+      if (activeNetworkKey !== "fuji") {
+        return { ok: false, error: "x402 withdrawals are available on Fuji only." };
+      }
+
+      let derivedKey: OneTimeSpendingKey | null = null;
+      try {
+        derivedKey = deriveOneTimeSpendingKey({
+          ephemeralPublicKey: input.ephemeralPublicKey,
+          viewingPrivateKey: bundle.secrets.viewingPrivateKey,
+          spendingPrivateKey: bundle.secrets.spendingPrivateKey,
+          expectedStealthAddress: input.stealthAddress,
+          schemeId: input.schemeId ?? SCHEME_ID_SECP256K1,
+        });
+        // The one-time key signs here, in the browser. Only the resulting
+        // EIP-3009 signature is sent to the relay — never the key.
+        const account = privateKeyToAccount(derivedKey.privateKey.toHex());
+        const balance = await getPublicClient(activeNetworkKey).readContract({
+          address: FUJI_USDC.address,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [account.address],
+        });
+        if (balance === 0n) return { ok: false, error: "This address holds no USDC." };
+
+        const result = await withdrawStealthTokenViaX402({
+          stealthSigner: account,
+          to: input.to,
+          amount: balance,
+          asset: FUJI_USDC,
+          network: X402_FUJI_NETWORK,
+        });
+        // The backend already verified this receipt; read it here too so the
+        // browser does not take the server's word for it.
+        const receipt = await getPublicClient(activeNetworkKey).getTransactionReceipt({
+          hash: result.txHash,
+        });
+        if (receipt.status !== "success") {
+          return { ok: false, error: "The withdrawal transaction reverted on-chain." };
+        }
+
+        recordLocalActivity({
+          id: result.txHash,
+          kind: "forward",
+          network: activeNetworkKey,
+          from: account.address,
+          to: input.to,
+          assetSymbol: FUJI_USDC.symbol,
+          assetDecimals: FUJI_USDC.decimals,
+          isNative: false,
+          tokenContract: FUJI_USDC.address,
+          amount: formatUnits(balance, FUJI_USDC.decimals),
+          txHash: result.txHash,
+          blockNumber: receipt.blockNumber.toString(),
+          timestamp: new Date().toISOString(),
+          x402: { status: "settled", paymentId: input.stealthAddress, announcementTx: null },
+        });
+        return { ok: true, txHash: result.txHash };
+      } catch (err) {
+        return { ok: false, error: toSafeErrorMessage(err) };
+      } finally {
+        derivedKey?.privateKey.destroy();
+      }
+    },
+    [activeNetworkKey],
+  );
+
   const value = React.useMemo<StealthIdentityContextValue>(
     () => ({
       publicIdentity,
@@ -497,6 +579,7 @@ export function StealthIdentityProvider({
       checkAnnouncement,
       proveSpendControl,
       forwardPayment,
+      withdrawX402Token,
     }),
     [
       publicIdentity,
@@ -518,6 +601,7 @@ export function StealthIdentityProvider({
       checkAnnouncement,
       proveSpendControl,
       forwardPayment,
+      withdrawX402Token,
     ],
   );
 

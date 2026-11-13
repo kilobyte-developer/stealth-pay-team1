@@ -24,6 +24,18 @@ export const NATIVE_TOKEN_SENTINEL = getAddress(
 /** `transferFrom(address,address,uint256)` — what the router uses for ERC-20. */
 export const ERC20_TRANSFER_FROM_SELECTOR = "0x23b872dd";
 
+/**
+ * EIP-3009 `transferWithAuthorization(...)` — what x402 `exact` settlement
+ * uses. Announced by the StealthPay x402 relayer after settlement confirms.
+ */
+export const EIP3009_TRANSFER_WITH_AUTHORIZATION_SELECTOR = "0xe3ee160e";
+
+/** Selectors whose metadata layout is viewTag ‖ selector ‖ token ‖ amount for an ERC-20. */
+const ERC20_SELECTORS: readonly string[] = [
+  ERC20_TRANSFER_FROM_SELECTOR,
+  EIP3009_TRANSFER_WITH_AUTHORIZATION_SELECTOR,
+];
+
 export type AnnouncedAssetKind = "native" | "erc20" | "unknown";
 
 export interface ParsedAnnouncementMetadata {
@@ -84,7 +96,7 @@ export function parseAnnouncementMetadata(
   }
 
   if (
-    selector.toLowerCase() === ERC20_TRANSFER_FROM_SELECTOR &&
+    ERC20_SELECTORS.includes(selector.toLowerCase()) &&
     asset !== null &&
     asset !== NATIVE_TOKEN_SENTINEL
   ) {

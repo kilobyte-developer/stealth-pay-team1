@@ -204,27 +204,27 @@ npm install
 
 ## Environment Variables
 
-The frontend currently needs **no environment variables** — network configuration lives in [`src/config/networks.ts`](src/config/networks.ts) and Fuji is the default. The variables below are planned for when the contracts, backend and scanner land.
-
 ```bash
-# Avalanche network
-NEXT_PUBLIC_CHAIN_ID=43113
-NEXT_PUBLIC_RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
-
-# Deployed contracts (filled in after deployment — see below)
-NEXT_PUBLIC_ANNOUNCER_ADDRESS=
-NEXT_PUBLIC_ROUTER_ADDRESS=
-
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-
-# Contract deployment (Hardhat) — testnet only, never a funded mainnet key
-FUJI_DEPLOYER_PRIVATE_KEY=
+cp .env.example .env.local
 ```
 
-**Never commit `.env` files.** The deployer key above is for **Fuji testnet only** and must never hold mainnet funds.
+[`.env.example`](.env.example) lists every variable the app reads, with comments. It is
+pre-filled with the public Fuji values: the deployed contract addresses, scan start block and
+x402 facilitator URL. To send or receive **USDC via x402** you must also add a dedicated Fuji
+**relayer key** and fund it with a little test AVAX. Follow
+[First-time setup](docs/X402_INTEGRATION.md#first-time-setup-public-avalanche-fuji). It also has
+the full variable reference and how to test a payment.
+
+- **Public** (`NEXT_PUBLIC_*`, shipped to the browser): contract addresses, scan start block,
+  x402 toggle, optional RPC overrides.
+- **Server-only:** `X402_FACILITATOR_URL`, `STEALTHPAY_RELAYER_PRIVATE_KEY` (**secret**),
+  `X402_FUJI_RPC_URL`, `STEALTHPAY_X402_STORE_PATH`, and the optional debug-log
+  `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` (**secret**).
+- **Contract deployment** uses a separate `contracts/.env` (see `contracts/.env.example`).
+  You don't need it to run the app.
+
+**Never commit `.env` / `.env.local` files** (they are gitignored; only `.env.example` is
+tracked). Keys here are for **Fuji testnet only** and must never hold mainnet funds.
 
 ## Local Development
 

@@ -75,23 +75,119 @@ USDC balance, and derives the one-time spending key locally.
 
 Only public data crosses the API: no private, viewing, spending or ephemeral private key and no meta-address.
 
-## Configuration
+## First-time setup (public Avalanche Fuji)
 
-Frontend (`.env`, public):
+Everything runs on **Avalanche Fuji testnet** (chain ID `43113`) against the contracts that are
+already deployed. Nothing needs deploying, and no real funds are involved.
 
-| Variable | |
-|---|---|
-| `NEXT_PUBLIC_FUJI_X402_ENABLED=true` | Shows **USDC** (x402) in the Send asset list |
-| `NEXT_PUBLIC_FUJI_ANNOUNCER_ADDRESS` | Existing; also used by the backend |
+### 1. Install and create your env file
 
-Backend (`.env.local` or the host's secret store. **Never** `NEXT_PUBLIC_`):
+```bash
+npm install
+cp .env.example .env.local
+```
 
-| Variable | |
-|---|---|
-| `X402_FACILITATOR_URL` | e.g. `https://facilitator.payai.network` (lists `exact` on `eip155:43113`) |
-| `STEALTHPAY_RELAYER_PRIVATE_KEY` | Dedicated Fuji account with a little AVAX. It only calls `announce()` and never holds tokens. |
-| `X402_FUJI_RPC_URL` | Optional; defaults to the public Fuji RPC |
-| `STEALTHPAY_X402_STORE_PATH` | Optional; defaults to `.stealthpay/x402-payments.json` (gitignored) |
+`.env.example` already holds the public Fuji values: contract addresses, scan start block and
+the PayAI facilitator URL. The only value you **must** add is the relayer key (step 2).
+`.env.local` is gitignored; never commit it.
+
+### 2. Create a dedicated Fuji relayer wallet
+
+The backend publishes each ERC-5564 announcement from its own "relayer" account after the
+payment is confirmed on-chain. That account needs a little AVAX for gas and nothing else.
+Use a **brand-new key that has never held real funds**: not your MetaMask account, and not the
+public Hardhat test keys.
+
+This command generates a key, writes it into `.env.local` without showing it, and prints
+only its address:
+
+```bash
+node -e "const fs=require('fs');const {generatePrivateKey,privateKeyToAddress}=require('viem/accounts');const p='.env.local';const t=fs.readFileSync(p,'utf8');if(/^STEALTHPAY_RELAYER_PRIVATE_KEY=0x/m.test(t))throw new Error('already set');const k=generatePrivateKey();fs.writeFileSync(p,t.replace(/^STEALTHPAY_RELAYER_PRIVATE_KEY=.*$/m,'STEALTHPAY_RELAYER_PRIVATE_KEY='+k));console.log('Relayer address - fund with ~0.1 Fuji AVAX:',privateKeyToAddress(k))"
+```
+
+There is no separate "relayer address" variable; the app derives it from the key. To see
+it again later:
+
+```bash
+node -e "const t=require('fs').readFileSync('.env.local','utf8');const k=t.match(/^STEALTHPAY_RELAYER_PRIVATE_KEY=(0x[0-9a-fA-F]{64})/m)[1];console.log(require('viem/accounts').privateKeyToAddress(k))"
+```
+
+### 3. Fund the relayer with Fuji AVAX
+
+Send about **0.05–0.1 Fuji AVAX** to the printed relayer address, from the
+[Core testnet faucet](https://core.app/tools/testnet-faucet/) (it may ask for a coupon code or
+a small mainnet balance) or from another Fuji wallet. At current Fuji fees one announcement
+costs a few millionths of an AVAX. If the relayer runs dry, payments still settle. The
+announcement then fails with a clear "relayer … has 0 AVAX" message and can be retried after
+funding, without charging the sender again.
+
+### 4. Start the app
+
+```bash
+npm run dev          # http://localhost:3000
+```
+
+Quick server check, with no wallet needed. An empty body should return
+`400 WRONG_NETWORK`. If it returns `503 x402_not_configured`, the relayer key is missing.
+
+```bash
+curl -s -X POST -H "content-type: application/json" --data "{}" http://localhost:3000/api/x402/stealth-payments
+```
+
+### 5. Test an x402 payment
+
+1. **MetaMask:** add **Avalanche Fuji C-Chain**: RPC `https://api.avax-test.network/ext/bc/C/rpc`,
+   chain ID `43113`, symbol `AVAX`, explorer `https://testnet.snowtrace.io`. Use two test accounts,
+   one for the sender and one for the receiver.
+2. **Fund the sender with test USDC** from the [Circle faucet](https://faucet.circle.com) (choose
+   Avalanche Fuji). Optionally import the token `0x5425890298aed601595a70AB815c96711a31Bc65` in
+   MetaMask to see the balance. The sender needs **no AVAX** for x402, because they only sign.
+   The receiver needs nothing.
+3. **Receiver:** on **Receive**, connect, create a stealth identity, and copy the meta-address (`st:avax:0x…`).
+4. **Sender:** on **Send**, paste the meta-address and choose **USDC**, then:
+   1. Enter `0.001`.
+   2. Click **Derive one-time address**, then **Review & Send**, then **Confirm & send**.
+   3. MetaMask shows a `TransferWithAuthorization` signature, with no gas fee and no approval. Sign it.
+5. Expect "Payment sent" with Announcement **Published**, and both transactions on Snowtrace.
+6. **Receiver:** **Rescan**. The payment appears, and **Forward** sends it to your normal wallet
+   gaslessly. **Activity** on both sides shows the history.
+
+### Environment variable reference
+
+All names below are exactly what the code reads. "Public" values end up in the browser
+bundle; "server-only" values are read by API routes only.
+
+| Variable | Scope | Required? | Purpose / where to get it |
+|---|---|---|---|
+| `NEXT_PUBLIC_FUJI_ANNOUNCER_ADDRESS` | public | required to receive | ERC-5564 Announcer `0x576c…1342` (`contracts/deployments/fuji.json`) |
+| `NEXT_PUBLIC_FUJI_ROUTER_ADDRESS` | public | required for AVAX/stUSD sends | StealthPaymentRouter `0xB14D…09cB` (same file) |
+| `NEXT_PUBLIC_FUJI_TEST_TOKEN_ADDRESS` | public | optional | stUSD `0xB114…e9C0`. Blank hides stUSD. Not x402-capable (no EIP-3009). |
+| `NEXT_PUBLIC_FUJI_SCAN_START_BLOCK` | public | recommended | `60645095`, the Announcer's deployment block. Blank/`0` scans from genesis. |
+| `NEXT_PUBLIC_FUJI_X402_ENABLED` | public | required for x402 | `true` shows **USDC (x402)** in Send |
+| `NEXT_PUBLIC_FUJI_X402_USDC_ADDRESS` | public | optional | Leave blank: Circle Fuji USDC `0x5425…Bc65`. Local Hardhat only. |
+| `NEXT_PUBLIC_FUJI_RPC_URL` | public | optional | Leave blank: public Fuji RPC. A loopback URL enables local Hardhat mode. |
+| `NEXT_PUBLIC_FUJI_EXPLORER_API_URL` | public | optional | Leave **unset**: Snowtrace API. An empty value disables fast scanning. |
+| `NEXT_PUBLIC_MAINNET_*` (4 vars) | public | not used | Mainnet is out of scope. Leave blank. |
+| `X402_FACILITATOR_URL` | server-only | required for x402 | `https://facilitator.payai.network` (no API key). Local Hardhat: `http://127.0.0.1:4022`. |
+| `STEALTHPAY_RELAYER_PRIVATE_KEY` | server-only, **SECRET** | required for x402 | Dedicated Fuji relayer key (steps 2–3) |
+| `X402_FUJI_RPC_URL` | server-only | optional | Backend RPC override. Blank: same as the app. |
+| `STEALTHPAY_X402_STORE_PATH` | server-only | optional | Payment-state file. Blank: `.stealthpay/x402-payments.json` (gitignored, public data only). |
+| `SUPABASE_URL` | server-only | optional | Dev-only debug log, see [DEBUG_LOG.md](./DEBUG_LOG.md). Blank: disabled. |
+| `SUPABASE_SERVICE_ROLE_KEY` | server-only, **SECRET** | optional | Service-role key for the debug log. Never `NEXT_PUBLIC_`. |
+
+Not in `.env.local`:
+- **Deploying contracts** uses `contracts/.env` (`DEPLOYER_PRIVATE_KEY`, `FUJI_RPC_URL`,
+  `FUJI_ANNOUNCER_ADDRESS`, `FUJI_PAYMENT_ROUTER_ADDRESS`); see `contracts/.env.example`.
+  You don't need it to run or test the app.
+- **Local Hardhat testing** writes its own `.env.development.local`. Its helper scripts take
+  one-off command-line variables (`LOCAL_SENDER_ADDRESS`, `LOCAL_FUND_ADDRESS`, `LOCAL_FUND_USDC`,
+  `LOCAL_RPC_URL`, `LOCAL_FACILITATOR_PORT`, `LOCAL_FACILITATOR_PRIVATE_KEY`); see
+  [Local browser testing](#local-browser-testing-hardhat-no-real-funds).
+- **Tests** take `LOCAL_STACK_URL`, `LOCAL_STACK_EVIDENCE` and `SKIP_CHAIN_INTEGRATION`, set on the command line.
+
+**Sensitive:** `STEALTHPAY_RELAYER_PRIVATE_KEY`, `SUPABASE_SERVICE_ROLE_KEY` and
+`contracts/.env`'s `DEPLOYER_PRIVATE_KEY`. Keep them only in local, gitignored files or a
+host's secret store. Everything else is public, on-chain or URL data.
 
 Payment state is a JSON file for a single Node process. Multi-instance or serverless deployments
 need a database-backed `PaymentStore` (`src/lib/x402/server/store.ts`).
